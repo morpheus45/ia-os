@@ -1,0 +1,93 @@
+[Unit]
+Description=agent-os — runtime de l'agent autonome
+Documentation=file:///usr/share/doc/agent-os/README.md
+# Le réseau n'est pas requis pour démarrer : la machine doit fonctionner en
+# local même sans lien montant. Le routeur de modèles s'en accommode seul.
+Wants=network-online.target agentos-model.service
+After=network-online.target agentos-model.service local-fs.target
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=agentos
+Group=agentos
+WorkingDirectory=/var/lib/agentos
+
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=AGENTOS_LOG=INFO
+# Les secrets vivent dans un fichier 0600 appartenant à agentos, jamais dans
+# l'unité : `systemctl show` et `systemd-analyze` exposent l'unité entière.
+EnvironmentFile=-/etc/agentos/secrets.env
+
+ExecStart=/usr/bin/python3 -m agentos
+ExecReload=/bin/kill -HUP $MAINPID
+
+Restart=always
+RestartSec=5
+# Sans ce plafond, une panne au démarrage — base corrompue, configuration
+# fautive — ferait boucler systemd indéfiniment sans que rien ne le signale.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Le démon bat toutes les 30 s (il vise la moitié de cette valeur). Un
+# processus bloqué sur un verrou ou une entrée-sortie est ainsi relancé au
+# lieu de rester debout sans rien faire.
+WatchdogSec=60s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+
+# --- isolation ----------------------------------------------------------
+# Le système est en lecture seule à l'exception des trois répertoires dont
+# le service a réellement besoin.
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/agentos /var/log/agentos /run/agentos
+StateDirectory=agentos
+LogsDirectory=agentos
+RuntimeDirectory=agentos
+
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateUsers=no
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+
+NoNewPrivileges=yes
+# Aucune capacité : le service n'ouvre aucun port privilégié et ne touche
+# à aucun périphérique.
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @obsolete
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# L'agent ne doit pas pouvoir se rendre root par un binaire setuid déposé
+# dans son espace de travail.
+NoExecPaths=/var/lib/agentos/workspace
+ExecPaths=/usr/bin /usr/lib /usr/local/bin
+
+# --- ressources ---------------------------------------------------------
+# Sur 16 Go partagés avec un modèle local, le runtime doit rester borné :
+# c'est le modèle qui a besoin de place, pas l'orchestrateur.
+MemoryMax=3G
+MemoryHigh=2G
+TasksMax=256
+# Le travail de fond ne doit jamais rendre la machine inutilisable.
+CPUWeight=50
+IOWeight=50
+OOMPolicy=stop
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,57 @@
+# Configuration d'agent-os. Les secrets ne vont jamais ici : ils vivent dans
+# /etc/agentos/secrets.env, en 0640 root:agentos.
+
+[agent]
+name = "agent-os"
+# Tours de boucle maximum sur une tâche. Garde-fou : un modèle qui part en
+# rond ne s'arrête pas de lui-même.
+max_turns = 12
+workspace = "/var/lib/agentos/workspace"
+shell_timeout_s = 60
+
+[memory]
+database = "/var/lib/agentos/memory.db"
+# Doit correspondre au modèle d'embedding. Un changement invalide l'index :
+# lancer « agentosctl memory reindex » après, démon arrêté.
+vector_dim = 768
+episodic_retention_days = 400
+# Similarité minimale d'un voisin vectoriel. Sans plancher, la recherche
+# renvoie ses plus proches voisins quelle que soit la question.
+min_similarity = 0.25
+
+[brain]
+# Ordre de préférence. Le routeur prend le premier backend sain et bascule
+# tout seul quand le réseau tombe.
+order = ["anthropic", "local"]
+anthropic_model = "claude-sonnet-5"
+anthropic_max_tokens = 4096
+local_url = "http://127.0.0.1:8080/v1"
+local_model = "qwen2.5-7b-instruct-q4_k_m"
+embed_model = "nomic-embed-text-v1.5"
+timeout_s = 120
+failure_threshold = 3
+cooldown_s = 60
+
+[scheduler]
+# Sur 16 Go partagés avec un modèle local, la RAM est le facteur limitant
+# bien avant le processeur.
+concurrency = 2
+max_attempts = 5
+job_timeout_s = 1800
+
+[api]
+# Boucle locale uniquement. Pour un accès distant : reverse proxy avec TLS,
+# ou tunnel SSH — jamais en changeant cette adresse.
+host = "127.0.0.1"
+port = 8787
+
+[remote]
+enabled = false
+# URL du projet Supabase, par exemple https://abcdefgh.supabase.co
+url = ""
+interval_s = 300
+batch = 500
+encrypt = true
+# Confiance maximale accordée à ce qui arrive d'une autre machine.
+# « external » signifie : donnée citée, jamais consigne.
+trust_ceiling = "external"

@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agent-os</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --fond: #fbfaf9; --carte: #fff; --trait: #e3e0dc; --texte: #1f1d1b;
+    --doux: #6b6560; --accent: #b8623a; --alerte: #a8322a; --ok: #3f7a4a;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --fond:#17161a; --carte:#201f24; --trait:#33313a; --texte:#eceaf0;
+            --doux:#a09aa8; --accent:#e08a5c; --alerte:#e5766c; --ok:#7fbf8e; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--fond); color:var(--texte); font:15px/1.55
+         system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding:20px 24px; border-bottom:1px solid var(--trait);
+           display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; }
+  h1 { margin:0; font-size:19px; letter-spacing:-.01em; }
+  .noeud { color:var(--doux); font-family:var(--mono); font-size:13px; }
+  main { max-width:1100px; margin:0 auto; padding:24px; display:grid; gap:20px; }
+  .grille { display:grid; gap:20px; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); }
+  section { background:var(--carte); border:1px solid var(--trait);
+            border-radius:10px; padding:18px; }
+  h2 { margin:0 0 12px; font-size:12px; text-transform:uppercase;
+       letter-spacing:.08em; color:var(--doux); font-weight:600; }
+  dl { margin:0; display:grid; grid-template-columns:auto 1fr; gap:6px 14px; font-size:14px; }
+  dt { color:var(--doux); }
+  dd { margin:0; font-family:var(--mono); font-size:13px; overflow-wrap:anywhere; }
+  textarea, input {
+    width:100%; padding:10px 12px; border:1px solid var(--trait); border-radius:8px;
+    background:var(--fond); color:var(--texte); font:inherit; }
+  textarea { min-height:78px; resize:vertical; }
+  button { padding:9px 16px; border:1px solid var(--accent); border-radius:8px;
+           background:var(--accent); color:#fff; font:inherit; font-weight:500;
+           cursor:pointer; }
+  button.secondaire { background:transparent; color:var(--accent); }
+  button:disabled { opacity:.5; cursor:progress; }
+  .barre { display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; }
+  pre { margin:12px 0 0; padding:14px; background:var(--fond); border-radius:8px;
+        border:1px solid var(--trait); white-space:pre-wrap; overflow-wrap:anywhere;
+        font-family:var(--mono); font-size:13px; max-height:340px; overflow:auto; }
+  ul { list-style:none; margin:0; padding:0; }
+  li { padding:9px 0; border-bottom:1px solid var(--trait); font-size:13.5px; }
+  li:last-child { border-bottom:0; }
+  .etiquette { display:inline-block; font-family:var(--mono); font-size:11px;
+               padding:1px 7px; border-radius:20px; border:1px solid var(--trait);
+               color:var(--doux); margin-right:8px; }
+  .suspect { color:var(--alerte); border-color:var(--alerte); }
+  .fiable { color:var(--ok); border-color:var(--ok); }
+  .erreur { color:var(--alerte); }
+  .vide { color:var(--doux); font-style:italic; }
+  footer { padding:0 24px 32px; color:var(--doux); font-size:12.5px; max-width:1100px;
+           margin:0 auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>agent-os</h1>
+  <span class="noeud" id="noeud">connexion…</span>
+</header>
+
+<main>
+  <section>
+    <h2>Confier une tâche</h2>
+    <textarea id="tache" placeholder="Par exemple : vérifie l'espace disque et note ce que tu trouves."></textarea>
+    <div class="barre">
+      <button id="envoyer">Exécuter</button>
+      <button id="differer" class="secondaire">Déposer en file</button>
+    </div>
+    <pre id="reponse" hidden></pre>
+  </section>
+
+  <div class="grille">
+    <section>
+      <h2>État</h2>
+      <dl id="etat"></dl>
+    </section>
+    <section>
+      <h2>Cerveaux</h2>
+      <ul id="cerveaux"></ul>
+    </section>
+  </div>
+
+  <section>
+    <h2>Mémoire</h2>
+    <input id="recherche" placeholder="Chercher dans la mémoire…" autocomplete="off">
+    <ul id="souvenirs"></ul>
+  </section>
+
+  <div class="grille">
+    <section>
+      <h2>Plannings</h2>
+      <ul id="plannings"></ul>
+    </section>
+    <section>
+      <h2>Travaux récents</h2>
+      <ul id="travaux"></ul>
+    </section>
+  </div>
+</main>
+
+<footer>
+  Les souvenirs marqués <span class="etiquette suspect">agent</span> ou
+  <span class="etiquette suspect">external</span> sont de la donnée citée : l'agent
+  ne les traite jamais comme des consignes. Seul ce que vous écrivez ici porte
+  <span class="etiquette fiable">operator</span>.
+</footer>
+
+<script>
+"use strict";
+
+// Le jeton n'est jamais écrit dans l'URL : elle finirait dans l'historique du
+// navigateur et dans les journaux d'un éventuel proxy.
+const jeton = new URLSearchParams(location.search).get("token") || "";
+if (jeton) history.replaceState(null, "", location.pathname);
+
+async function api(chemin, options = {}) {
+  const entetes = { "Content-Type": "application/json" };
+  if (jeton) entetes["X-Agentos-Token"] = jeton;
+  const reponse = await fetch(chemin, { ...options, headers: entetes });
+  const corps = await reponse.json().catch(() => ({}));
+  if (!reponse.ok) throw new Error(corps.erreur || `HTTP ${reponse.status}`);
+  return corps;
+}
+
+// Tout ce qui vient de la mémoire est inséré par textContent. Ce contenu peut
+// provenir d'une page web ou d'un fichier : le passer par innerHTML
+// reviendrait à exécuter chez l'opérateur ce qu'un tiers y a écrit.
+function ligne(...morceaux) {
+  const li = document.createElement("li");
+  for (const morceau of morceaux) {
+    if (typeof morceau === "string") li.append(document.createTextNode(morceau));
+    else li.append(morceau);
+  }
+  return li;
+}
+
+function etiquette(texte, classe = "") {
+  const span = document.createElement("span");
+  span.className = "etiquette " + classe;
+  span.textContent = texte;
+  return span;
+}
+
+function definir(dl, cle, valeur) {
+  const dt = document.createElement("dt");
+  dt.textContent = cle;
+  const dd = document.createElement("dd");
+  dd.textContent = valeur;
+  dl.append(dt, dd);
+}
+
+function vider(noeud, message) {
+  noeud.replaceChildren();
+  if (message) {
+    const li = ligne(message);
+    li.className = "vide";
+    noeud.append(li);
+  }
+}
+
+async function rafraichir() {
+  let etat;
+  try {
+    etat = await api("/api/status");
+  } catch (erreur) {
+    document.getElementById("noeud").textContent = "démon injoignable — " + erreur.message;
+    document.getElementById("noeud").className = "noeud erreur";
+    return;
+  }
+
+  document.getElementById("noeud").textContent =
+    `${etat.noeud} · v${etat.version} · debout depuis ${Math.round(etat.debout_depuis_s / 60)} min`;
+  document.getElementById("noeud").className = "noeud";
+
+  const dl = document.getElementById("etat");
+  dl.replaceChildren();
+  const m = etat.memoire;
+  definir(dl, "épisodes", m.episodes.toLocaleString("fr"));
+  definir(dl, "faits", m.facts.toLocaleString("fr"));
+  definir(dl, "index", `${m.index.entries.toLocaleString("fr")} (${m.index.backend})`);
+  definir(dl, "base", (m.bytes / 1e6).toFixed(1) + " Mo");
+  definir(dl, "travaux", JSON.stringify(etat.ordonnanceur.travaux));
+  if (etat.ordonnanceur.prochain) {
+    definir(dl, "prochain", `${etat.ordonnanceur.prochain.nom} dans ${etat.ordonnanceur.prochain.dans_s} s`);
+  }
+  definir(dl, "distant", etat.distant.actif
+    ? `${etat.distant.en_attente} en attente${etat.distant.chiffre ? ", chiffré" : ""}`
+    : "désactivé");
+
+  const cerveaux = document.getElementById("cerveaux");
+  cerveaux.replaceChildren();
+  for (const [nom, info] of Object.entries(etat.cerveau)) {
+    let statut = info.disponible ? "disponible" : "indisponible";
+    if (info.disjoncteur_ouvert) statut = `écarté ${info.reouverture_dans_s} s`;
+    cerveaux.append(ligne(
+      etiquette(info.actif ? "actif" : nom, info.actif ? "fiable" : ""),
+      `${info.modele} — ${statut}`));
+  }
+
+  const plannings = document.getElementById("plannings");
+  const listeP = (await api("/api/schedules")).plannings;
+  vider(plannings, listeP.length ? null : "aucun planning");
+  for (const p of listeP) {
+    plannings.append(ligne(etiquette(p.enabled ? "actif" : "off",
+      p.enabled ? "fiable" : ""), `${p.name} · ${p.cron} → ${p.job}`));
+  }
+
+  const travaux = document.getElementById("travaux");
+  const listeT = (await api("/api/jobs?limit=12")).travaux;
+  vider(travaux, listeT.length ? null : "aucun travail");
+  for (const t of listeT) {
+    travaux.append(ligne(
+      etiquette(t.state, t.state === "dead" ? "suspect" : t.state === "done" ? "fiable" : ""),
+      `${t.name} · essai ${t.attempts}/${t.max_attempts}`));
+  }
+}
+
+async function chercher(requete) {
+  const cible = document.getElementById("souvenirs");
+  if (!requete.trim()) { vider(cible, "tapez pour chercher"); return; }
+  let corps;
+  try {
+    corps = await api("/api/memory/search?q=" + encodeURIComponent(requete) + "&limit=15");
+  } catch (erreur) { vider(cible, erreur.message); return; }
+
+  vider(cible, corps.resultats.length ? null : "aucun souvenir pertinent");
+  for (const r of corps.resultats) {
+    const fiable = r.confiance === "operator";
+    cible.append(ligne(
+      etiquette(r.confiance, fiable ? "fiable" : "suspect"),
+      etiquette(r.portee),
+      r.texte));
+  }
+}
+
+async function executer(differe) {
+  const champ = document.getElementById("tache");
+  const sortie = document.getElementById("reponse");
+  const boutons = [document.getElementById("envoyer"), document.getElementById("differer")];
+  if (!champ.value.trim()) return;
+
+  boutons.forEach(b => b.disabled = true);
+  sortie.hidden = false;
+  sortie.className = "";
+  sortie.textContent = differe ? "dépôt…" : "en cours…";
+  try {
+    const corps = await api("/api/task", {
+      method: "POST",
+      body: JSON.stringify({ task: champ.value, async: differe }),
+    });
+    sortie.textContent = differe
+      ? `travail ${corps.uid} déposé`
+      : corps.texte + (corps.termine ? "" : `\n\n(arrêt : ${corps.arret}, ${corps.tours} tours)`);
+    if (!differe && corps.termine) champ.value = "";
+  } catch (erreur) {
+    sortie.className = "erreur";
+    sortie.textContent = erreur.message;
+  } finally {
+    boutons.forEach(b => b.disabled = false);
+    rafraichir();
+  }
+}
+
+document.getElementById("envoyer").addEventListener("click", () => executer(false));
+document.getElementById("differer").addEventListener("click", () => executer(true));
+document.getElementById("tache").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) executer(false);
+});
+
+let minuteur;
+document.getElementById("recherche").addEventListener("input", (e) => {
+  clearTimeout(minuteur);
+  const valeur = e.target.value;
+  minuteur = setTimeout(() => chercher(valeur), 220);
+});
+
+vider(document.getElementById("souvenirs"), "tapez pour chercher");
+rafraichir();
+setInterval(rafraichir, 10000);
+</script>
+</body>
+</html>

@@ -1,0 +1,45 @@
+#!/usr/sbin/nft -f
+# Pare-feu d'une machine agent-os.
+#
+# Le principe : rien n'entre sauf SSH, tout sort. La console et le serveur
+# de modèle écoutent la boucle locale et ne sont donc jamais joignables de
+# l'extérieur, même si un réglage les exposait par mégarde — la règle
+# d'entrée les couvre.
+
+flush ruleset
+
+table inet agentos {
+    chain entree {
+        type filter hook input priority filter; policy drop;
+
+        # Le trafic déjà établi doit passer avant tout le reste : sans cette
+        # règle en tête, chaque paquet de retour serait réévalué par toute la
+        # chaîne.
+        ct state established,related accept
+        ct state invalid drop
+
+        iif lo accept
+
+        # ICMP reste ouvert : le bloquer casse la découverte de MTU et rend
+        # les diagnostics réseau impossibles, pour un gain de sécurité nul.
+        ip protocol icmp icmp type { echo-request, destination-unreachable, time-exceeded } accept
+        ip6 nexthdr icmpv6 accept
+
+        # SSH, avec une limite qui ralentit le balayage sans gêner un humain.
+        tcp dport 22 ct state new limit rate 10/minute burst 5 packets accept
+
+        # Tout le reste est refusé silencieusement plutôt que rejeté :
+        # un scan n'apprend pas que la machine existe.
+        counter drop
+    }
+
+    chain transfert {
+        type filter hook forward priority filter; policy drop;
+        # La machine n'est pas un routeur.
+        counter drop
+    }
+
+    chain sortie {
+        type filter hook output priority filter; policy accept;
+    }
+}

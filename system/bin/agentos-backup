@@ -1,0 +1,81 @@
+#!/usr/bin/python3
+"""Instantané cohérent de la mémoire.
+
+`sqlite3.backup` plutôt qu'une copie de fichier : copier une base pendant
+qu'elle est écrite donne un instantané incohérent, et le WAL séparé ne
+rattrape pas la différence. L'API de sauvegarde de SQLite prend un verrou
+propre et produit un fichier immédiatement réutilisable.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sqlite3
+import sys
+import time
+from pathlib import Path
+
+DEFAULT_SOURCE = Path("/var/lib/agentos/memory.db")
+DEFAULT_TARGET = Path("/var/lib/agentos/sauvegardes")
+
+
+def snapshot(source: Path, target_dir: Path, keep: int) -> Path:
+    if not source.exists():
+        raise SystemExit(f"base introuvable : {source}")
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    destination = target_dir / f"memoire-{stamp}.db"
+    # Deux exécutions dans la même seconde produiraient le même nom : la
+    # seconde écraserait silencieusement la première, ce qui est exactement
+    # le contraire de ce qu'on attend d'une sauvegarde.
+    suffix = 1
+    while destination.exists():
+        destination = target_dir / f"memoire-{stamp}-{suffix}.db"
+        suffix += 1
+
+    # Ouverture en lecture seule : une sauvegarde ne doit jamais pouvoir
+    # modifier ce qu'elle sauvegarde, même par accident.
+    source_conn = sqlite3.connect(f"file:{source}?mode=ro", uri=True)
+    target_conn = sqlite3.connect(destination)
+    try:
+        source_conn.backup(target_conn)
+    finally:
+        target_conn.close()
+        source_conn.close()
+
+    prune(target_dir, keep)
+    return destination
+
+
+def prune(target_dir: Path, keep: int) -> int:
+    """Ne garde que les `keep` instantanés les plus récents."""
+    snapshots = sorted(target_dir.glob("memoire-*.db"),
+                       key=lambda p: p.stat().st_mtime, reverse=True)
+    removed = 0
+    for stale in snapshots[keep:]:
+        stale.unlink(missing_ok=True)
+        removed += 1
+    return removed
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Instantané de la mémoire agent-os.")
+    parser.add_argument("--source", type=Path, default=DEFAULT_SOURCE)
+    parser.add_argument("--target", type=Path, default=DEFAULT_TARGET)
+    parser.add_argument("--keep", type=int, default=14,
+                        help="nombre d'instantanés conservés (défaut : 14)")
+    args = parser.parse_args(argv)
+
+    try:
+        destination = snapshot(args.source, args.target, max(1, args.keep))
+    except sqlite3.Error as exc:
+        print(f"sauvegarde impossible : {exc}", file=sys.stderr)
+        return 1
+    size = destination.stat().st_size
+    print(f"{destination} ({size / 1e6:.1f} Mo)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

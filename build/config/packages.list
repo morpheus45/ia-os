@@ -1,0 +1,55 @@
+# Paquets de l'image. Une ligne par paquet ; # commente.
+#
+# Le principe : rien qui ne serve au rôle de la machine. Pas de bureau, pas
+# de navigateur, pas de serveur d'impression. Chaque paquet en moins est une
+# mise à jour de sécurité en moins à suivre sur une machine qui doit tourner
+# des mois sans intervention.
+
+# --- amorçage et noyau ---
+linux-image-amd64
+systemd-sysv
+systemd-timesyncd
+init
+live-boot
+grub-efi-amd64-bin
+grub-pc-bin
+grub2-common
+efibootmgr
+
+# --- outils de l'installateur ---
+parted
+gdisk
+dosfstools
+e2fsprogs
+btrfs-progs
+cryptsetup
+rsync
+squashfs-tools
+
+# --- runtime agent-os ---
+python3
+python3-minimal
+# numpy fait passer la recherche vectorielle d'un balayage Python à un
+# produit matriciel : sans lui, l'index est plafonné à 20 000 entrées.
+python3-numpy
+# cryptography chiffre la mémoire avant tout envoi distant ; cffi est sa
+# liaison native, sans laquelle l'import réussit puis échoue à l'usage.
+python3-cryptography
+python3-cffi
+sqlite3
+ca-certificates
+
+# --- réseau et administration ---
+openssh-server
+nftables
+systemd-resolved
+iproute2
+iputils-ping
+curl
+wget
+less
+nano
+htop
+lsof
+smartmontools
+zstd

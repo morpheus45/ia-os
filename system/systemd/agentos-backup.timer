@@ -1,0 +1,11 @@
+[Unit]
+Description=agent-os — instantané quotidien de la mémoire
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+# Une machine éteinte à 2 h 30 doit quand même être sauvegardée au réveil.
+Persistent=true
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target

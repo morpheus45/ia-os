@@ -1,0 +1,21 @@
+[Unit]
+Description=agent-os — instantané de la mémoire
+After=agentos.service
+ConditionPathExists=/var/lib/agentos/memory.db
+
+[Service]
+Type=oneshot
+User=agentos
+Group=agentos
+ExecStart=/usr/local/bin/agentos-backup --keep 14
+
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/agentos
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+# Une sauvegarde n'a aucune raison de parler au réseau.
+RestrictAddressFamilies=AF_UNIX
+SystemCallArchitectures=native

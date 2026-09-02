@@ -1,0 +1,50 @@
+[Unit]
+Description=agent-os — serveur de modèle local (llama.cpp)
+Documentation=https://github.com/ggml-org/llama.cpp
+# Le service ne démarre que si un modèle est réellement présent. Sans cette
+# condition, une machine sans modèle téléchargé verrait systemd relancer en
+# boucle un serveur qui ne peut pas démarrer.
+ConditionPathExistsGlob=/var/lib/models/*.gguf
+After=local-fs.target
+
+[Service]
+Type=exec
+User=agentos
+Group=agentos
+WorkingDirectory=/var/lib/models
+EnvironmentFile=-/etc/agentos/model.env
+
+# AGENTOS_MODEL_FILE est défini dans model.env ; à défaut, le premier .gguf
+# trouvé fait l'affaire.
+ExecStart=/bin/sh -c 'exec /usr/local/bin/llama-server \
+  --model "${AGENTOS_MODEL_FILE:-$(ls -1 /var/lib/models/*.gguf | head -n1)}" \
+  --host 127.0.0.1 --port 8080 \
+  --ctx-size "${AGENTOS_CTX:-8192}" \
+  --threads "${AGENTOS_THREADS:-4}" \
+  --embeddings \
+  --no-webui'
+
+Restart=always
+RestartSec=10
+TimeoutStartSec=300
+
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/models
+PrivateTmp=yes
+PrivateDevices=no
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+
+# Le modèle a droit à la plus grosse part, mais pas à toute la machine :
+# au-delà, le noyau tuerait le runtime plutôt que le serveur de modèle.
+MemoryMax=11G
+CPUWeight=100
+OOMScoreAdjust=200
+
+[Install]
+WantedBy=multi-user.target
