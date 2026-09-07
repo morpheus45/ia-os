@@ -49,6 +49,10 @@ barre suppose la disposition de waybar d'Omarchy.
 
 ### Sur une machine dédiée — sans écran, sans bureau
 
+Sans machine Linux sous la main, l'onglet **Actions** du dépôt construit
+l'image et la met en téléchargement — voir [docs/cle-usb.md](docs/cle-usb.md).
+En local :
+
 ```bash
 sudo ./build/build-iso.sh                    # produit une ISO amorçable
 sudo dd if=build/out/agent-os-*.iso of=/dev/sdX bs=4M status=progress conv=fsync
@@ -244,6 +248,7 @@ en clair.
 ## Documentation
 
 - [omarchy/README.md](omarchy/README.md) — machine Omarchy, agent intégré au bureau
+- [cle-usb.md](docs/cle-usb.md) — obtenir l'image et l'écrire sur une clé, depuis Windows
 - [installation.md](docs/installation.md) — de l'ISO à la première tâche
 - [architecture.md](docs/architecture.md) — les choix et leurs raisons
 - [memoire.md](docs/memoire.md) — modèle de mémoire et recherche

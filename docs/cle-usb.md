@@ -1,5 +1,19 @@
 # Écrire l'image sur une clé USB depuis Windows
 
+## Obtenir l'image sans machine Linux
+
+La construction demande `debootstrap`, `xorriso` et douze gigaoctets
+libres, donc une machine Debian ou Ubuntu. Depuis Windows, inutile
+d'installer WSL pour cela : le dépôt construit l'image sur GitHub.
+
+Onglet **Actions** → *Image d'installation* → **Run workflow**. Vingt
+minutes plus tard, l'ISO est en pièce jointe du run, avec sa somme de
+contrôle. Le résumé du run affiche le SHA-256 à comparer après
+téléchargement.
+
+Une étiquette `v…` poussée sur le dépôt publie en plus une *release*, dont
+le lien de téléchargement est direct et permanent.
+
 ## D'abord, ce qui bloque tout le monde
 
 **Le Secure Boot doit être désactivé.** L'image embarque un GRUB construit
