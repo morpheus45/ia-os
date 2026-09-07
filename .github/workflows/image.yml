@@ -95,6 +95,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Une release peut déjà exister : créer une version depuis
+          # l'interface de GitHub crée l'étiquette, ce qui déclenche ce
+          # workflow — lequel trouverait alors la release en place. On
+          # téléverse dans ce cas au lieu d'échouer.
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" build/out/* --clobber
+            exit 0
+          fi
           gh release create "${GITHUB_REF_NAME}" build/out/* \
             --title "agent-os ${GITHUB_REF_NAME}" \
             --notes "Image d'installation amorçable, BIOS et UEFI.
