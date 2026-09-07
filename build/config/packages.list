@@ -40,6 +40,9 @@ sqlite3
 ca-certificates
 
 # --- réseau et administration ---
+# sudo : la session live y invite explicitement (« sudo agentos-installer »).
+# Sans lui, l'unique action que propose l'image est impossible.
+sudo
 openssh-server
 nftables
 systemd-resolved

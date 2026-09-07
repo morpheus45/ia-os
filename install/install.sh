@@ -284,6 +284,8 @@ export DEBIAN_FRONTEND=noninteractive
 systemctl disable getty@tty1 2>/dev/null || true
 rm -f /etc/systemd/system/getty@tty1.service.d/autologin.conf
 userdel -r live 2>/dev/null || true
+# Le privilège sans mot de passe n'avait de sens que sur l'image.
+rm -f /etc/sudoers.d/live
 
 # L'identifiant de machine et les clés SSH sont régénérés : partagés entre
 # installations, ils permettraient de se faire passer pour une autre machine.

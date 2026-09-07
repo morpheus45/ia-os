@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import os
 import random
 import threading
 import time
@@ -301,3 +302,97 @@ class EmbedderTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ConfigTolerantTest(unittest.TestCase):
+    """`doctor` doit rester utilisable quand la configuration ne l'est pas.
+
+    Constaté sur l'image réelle : la CLI abandonnait au lieu de diagnostiquer,
+    parce que /etc/agentos/config.toml est en 0640 root:agentos et que le
+    compte de la session live n'appartient pas à ce groupe.
+    """
+
+    def setUp(self):
+        import os
+        import tempfile
+        from pathlib import Path
+
+        self.racine = Path(tempfile.mkdtemp(prefix="agentos-conf-"))
+        (self.racine / "etc/agentos").mkdir(parents=True)
+        self.toml = self.racine / "etc/agentos/config.toml"
+        self.toml.write_text("[api]\nport = 9999\n", encoding="utf-8")
+        self._ancien = os.environ.get("AGENTOS_ROOT")
+        os.environ["AGENTOS_ROOT"] = str(self.racine)
+        import importlib
+
+        from agentos import config as config_module
+
+        self.config_module = importlib.reload(config_module)
+
+    def tearDown(self):
+        import importlib
+        import os
+
+        if self._ancien is None:
+            os.environ.pop("AGENTOS_ROOT", None)
+        else:
+            os.environ["AGENTOS_ROOT"] = self._ancien
+        from agentos import config as config_module
+
+        importlib.reload(config_module)
+
+    def test_readable_config_is_loaded(self):
+        self.assertEqual(self.config_module.load().api.port, 9999)
+
+    def _rendre_illisible(self):
+        """Rend la lecture impossible sans dépendre des droits.
+
+        Un simple chmod 000 ne prouve rien quand la suite tourne en root,
+        qui le contourne. Remplacer le fichier par un répertoire fait lever
+        la même famille d'erreur — OSError — quel que soit l'utilisateur.
+        """
+        self.toml.unlink()
+        self.toml.mkdir()
+
+    def test_unreadable_config_is_fatal_when_strict(self):
+        self._rendre_illisible()
+        with self.assertRaises(SystemExit):
+            self.config_module.load(strict=True)
+
+    def test_unreadable_config_is_reported_when_tolerant(self):
+        self._rendre_illisible()
+        cfg = self.config_module.load(strict=False)
+        self.assertTrue(cfg.problemes)
+        self.assertIn("illisible", cfg.problemes[0])
+        self.assertEqual(cfg.api.port, 8787, "les défauts prennent le relais")
+
+    @unittest.skipIf(os.geteuid() == 0, "root contourne les droits de lecture")
+    def test_permission_denied_is_reported(self):
+        """Le cas constaté sur l'image : config.toml en 0640 root:agentos,
+        lue par un compte hors du groupe."""
+        self.toml.chmod(0o000)
+        try:
+            cfg = self.config_module.load(strict=False)
+        finally:
+            self.toml.chmod(0o644)
+        self.assertTrue(cfg.problemes)
+
+    def test_malformed_config_is_reported_when_tolerant(self):
+        self.toml.write_text("ceci ][ n'est pas du TOML", encoding="utf-8")
+        cfg = self.config_module.load(strict=False)
+        self.assertTrue(cfg.problemes)
+
+    def test_missing_config_is_not_a_problem(self):
+        self.toml.unlink()
+        cfg = self.config_module.load(strict=False)
+        self.assertEqual(cfg.problemes, [], "une machine neuve n'a pas encore de config")
+
+    def test_unreadable_directory_does_not_crash_the_probe(self):
+        """Sonder les droits ne doit pas être plus fragile que les ignorer."""
+        repertoire = self.racine / "etc/agentos"
+        repertoire.chmod(0o000)
+        try:
+            cfg = self.config_module.load(strict=False)
+        finally:
+            repertoire.chmod(0o755)
+        self.assertIsNotNone(cfg)

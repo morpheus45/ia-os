@@ -212,6 +212,9 @@ def cmd_doctor(config, args) -> int:
 
     print(f"agent-os · nœud {config.remote.node_id}\n")
 
+    for anomalie in config.problemes:
+        check("configuration", False, anomalie, fatal=False)
+
     database = config.memory.database
     parent = os.path.dirname(database) or "."
     # Le répertoire peut ne pas exister au premier démarrage : ce qui compte
@@ -330,7 +333,9 @@ COMMANDS = {
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    config = config_module.load()
+    # `doctor` doit fonctionner quand la configuration est illisible : c'est
+    # exactement le cas qu'on lui demande de diagnostiquer.
+    config = config_module.load(strict=(args.command != "doctor"))
 
     if args.command == "memory" and args.action in ("search", "record", "forget") \
             and not args.query:

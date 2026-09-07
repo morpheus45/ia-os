@@ -151,6 +151,15 @@ useradd -m -s /bin/bash -G sudo live 2>/dev/null || true
 passwd -d live
 passwd -l root
 
+# Le compte live n'a pas de mot de passe : sudo en demanderait un que
+# personne ne pourrait fournir. Sur une image d'installation, dont c'est le
+# seul rôle, l'élévation sans mot de passe est le comportement attendu — et
+# l'installateur supprime ce fichier sur le système installé.
+cat > /etc/sudoers.d/live <<'EOL'
+live ALL=(ALL) NOPASSWD:ALL
+EOL
+chmod 0440 /etc/sudoers.d/live
+
 # La console d'installation s'ouvre sans demander d'identifiants : sur une
 # image live, un mot de passe n'ajoute rien et bloque une machine sans clavier.
 mkdir -p /etc/systemd/system/getty@tty1.service.d
@@ -229,12 +238,28 @@ mksquashfs "$CHROOT" "$ARBRE/live/filesystem.squashfs" \
 info "configuration de GRUB"
 cp "$ICI/grub/grub.cfg" "$ARBRE/boot/grub/grub.cfg"
 
+# La police Unicode est posée sur l'image, pas embarquée dans les binaires
+# d'amorçage : l'image BIOS est plafonnée à 480 Ko et la police en fait
+# 2,4 Mo — l'embarquer fait échouer grub-mkstandalone. GRUB la charge après
+# avoir trouvé le support. Sans elle, les accents du menu s'affichent en
+# points d'interrogation.
+mkdir -p "$ARBRE/boot/grub/fonts"
+for source in /usr/share/grub/unicode.pf2 /usr/share/grub2/unicode.pf2; do
+    [[ -f "$source" ]] && cp "$source" "$ARBRE/boot/grub/fonts/unicode.pf2" && break
+done
+[[ -f "$ARBRE/boot/grub/fonts/unicode.pf2" ]] \
+    || avert "police unicode introuvable : les accents du menu seront illisibles"
+
 # Image EFI autonome : elle embarque GRUB et sa configuration, si bien que la
 # clé démarre sur une machine UEFI sans rien installer sur l'ESP.
+#
+# La police Unicode est embarquée : sans elle, GRUB rend les accents en
+# points d'interrogation. Le surcoût est d'environ deux mégaoctets.
 grub-mkstandalone \
     --format=x86_64-efi \
     --output="$ARBRE/EFI/boot/bootx64.efi" \
     --locales="" --fonts="" \
+    --modules="part_gpt part_msdos iso9660 search search_label all_video gfxterm font" \
     "boot/grub/grub.cfg=$ARBRE/boot/grub/grub.cfg"
 
 # Partition EFI en FAT, embarquée dans l'ISO : c'est elle que le micrologiciel
@@ -251,8 +276,9 @@ cp "$efi_img" "$ARBRE/boot/grub/efiboot.img"
 grub-mkstandalone \
     --format=i386-pc \
     --output="$TRAVAIL/core.img" \
-    --install-modules="linux normal iso9660 biosdisk memdisk search tar ls" \
-    --modules="linux normal iso9660 biosdisk search" \
+    --install-modules="linux normal iso9660 biosdisk memdisk search search_label \
+        tar ls part_gpt part_msdos all_video gfxterm font" \
+    --modules="linux normal iso9660 biosdisk search search_label" \
     --locales="" --fonts="" \
     "boot/grub/grub.cfg=$ARBRE/boot/grub/grub.cfg"
 cat /usr/lib/grub/i386-pc/cdboot.img "$TRAVAIL/core.img" > "$ARBRE/boot/grub/bios.img"

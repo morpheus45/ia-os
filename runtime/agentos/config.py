@@ -145,6 +145,12 @@ class Config:
     api: ApiConfig = field(default_factory=ApiConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
 
+    #: Anomalies rencontrées au chargement, quand le mode indulgent est
+    #: demandé. `doctor` doit pouvoir les rapporter au lieu d'abandonner :
+    #: c'est justement lorsque la configuration est illisible qu'on a besoin
+    #: d'un diagnostic.
+    problemes: list[str] = field(default_factory=list)
+
     # --- secrets, jamais persistés dans le TOML ---
     anthropic_key: str = ""
     remote_key: str = ""
@@ -214,8 +220,15 @@ def _load_secrets_env(path: Path) -> dict[str, str]:
     return out
 
 
-def load(path: Path | None = None) -> Config:
-    """Assemble la configuration effective."""
+def load(path: Path | None = None, *, strict: bool = True) -> Config:
+    """Assemble la configuration effective.
+
+    En mode strict — celui du démon — une configuration illisible ou
+    malformée arrête le démarrage : mieux vaut ne pas partir que partir avec
+    des réglages qui ne sont pas ceux qu'on croit. En mode indulgent, les
+    anomalies sont consignées dans `problemes` et les défauts prennent le
+    relais, ce dont `doctor` a besoin pour diagnostiquer au lieu de mourir.
+    """
     cfg = Config()
 
     toml_path = path or ETC / "config.toml"
@@ -223,15 +236,32 @@ def load(path: Path | None = None) -> Config:
         raw = tomllib.loads(toml_path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         raw = {}
-    except (tomllib.TOMLDecodeError, PermissionError, UnicodeDecodeError) as exc:
-        raise SystemExit(f"config illisible : {toml_path}: {exc}") from exc
+    except (tomllib.TOMLDecodeError, PermissionError, UnicodeDecodeError, OSError) as exc:
+        message = f"{toml_path} illisible : {exc}"
+        if strict:
+            raise SystemExit(f"config illisible : {message}") from exc
+        cfg.problemes.append(message)
+        raw = {}
 
     for name in (f.name for f in fields(cfg)):
         section = getattr(cfg, name)
         if is_dataclass(section) and isinstance(raw.get(name), dict):
             _apply(section, raw[name])
 
-    env = {**_load_secrets_env(ETC / "secrets.env"), **os.environ}
+    secrets_path = ETC / "secrets.env"
+    secrets = _load_secrets_env(secrets_path)
+    if not secrets:
+        # `exists()` lève quand le répertoire parent n'est pas traversable :
+        # sonder les droits ne doit pas être plus fragile que de les ignorer.
+        try:
+            present, lisible = secrets_path.exists(), os.access(secrets_path, os.R_OK)
+        except OSError:
+            present, lisible = True, False
+        if present and not lisible:
+            cfg.problemes.append(
+                f"{secrets_path} illisible : ajouter l'utilisateur au groupe "
+                "agentos, ou passer par sudo")
+    env = {**secrets, **os.environ}
 
     for var, (section_name, field_name) in _ENV_MAP.items():
         if var in env and env[var] != "":
