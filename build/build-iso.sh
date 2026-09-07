@@ -216,6 +216,14 @@ rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/locale/*
 # l'image donnerait la même identité à toutes les installations, ce qui
 # permet de se faire passer pour l'une d'elles.
 rm -f /etc/ssh/ssh_host_*
+
+# Même raisonnement pour le jeton de la console, qu'install-system.sh a
+# tiré au hasard pendant la construction : figé dans l'image, il serait
+# identique sur toutes les machines qui en sortent — et publiquement connu
+# dès que l'image est diffusée. Un secret partagé par tous ne protège rien
+# et donne l'illusion du contraire. L'installateur en pose un nouveau sur
+# le système installé.
+sed -i 's/^AGENTOS_API_TOKEN=.*/AGENTOS_API_TOKEN=/' /etc/agentos/secrets.env
 rm -f /etc/machine-id /var/lib/dbus/machine-id
 # Un machine-id vide (et non absent) fait régénérer l'identifiant au premier
 # démarrage, ce que systemd attend explicitement.

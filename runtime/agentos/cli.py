@@ -244,6 +244,13 @@ def cmd_doctor(config, args) -> int:
     except Exception as exc:  # noqa: BLE001
         check("base de mémoire", False, str(exc))
 
+    # Un jeton vide ouvre les routes qui agissent à tout ce qui atteint la
+    # boucle locale — les autres comptes de la machine compris.
+    check("jeton de la console", bool(config.api.token),
+          "absent : les routes qui agissent sont ouvertes à tout compte local"
+          if not config.api.token else "présent",
+          fatal=False)
+
     check("clé Anthropic", bool(config.anthropic_key),
           "absente — le backend distant sera écarté" if not config.anthropic_key else "présente",
           fatal=False)

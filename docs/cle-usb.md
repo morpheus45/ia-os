@@ -1,5 +1,22 @@
 # Écrire l'image sur une clé USB depuis Windows
 
+## Le chemin le plus court
+
+Depuis PowerShell **en administrateur**, sur le PC où la clé est branchée :
+
+```powershell
+irm https://raw.githubusercontent.com/morpheus45/ia-os/main/outils/creer-cle.ps1 -OutFile creer-cle.ps1
+.\creer-cle.ps1
+```
+
+Le script télécharge la dernière image publiée, vérifie sa somme de
+contrôle, liste les disques en signalant celui qui porte Windows, demande
+confirmation, puis écrit. Il refuse le disque système et exige de taper
+« EFFACER » en toutes lettres.
+
+Il ne remplace pas la lecture de ce qui suit : le Secure Boot reste à
+désactiver à la main, et c'est ce qui bloque le plus de monde.
+
 ## Obtenir l'image sans machine Linux
 
 La construction demande `debootstrap`, `xorriso` et douze gigaoctets

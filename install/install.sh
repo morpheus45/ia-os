@@ -292,6 +292,12 @@ rm -f /etc/sudoers.d/live
 rm -f /etc/machine-id && systemd-machine-id-setup
 ssh-keygen -A
 
+# Jeton de la console, propre à cette machine. L'image n'en transporte
+# aucun : un secret identique sur toutes les installations issues de la
+# même ISO ne protégerait rien.
+jeton="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+sed -i "s|^AGENTOS_API_TOKEN=.*|AGENTOS_API_TOKEN=$jeton|" /etc/agentos/secrets.env
+
 # Le runtime doit démarrer au boot ; en live il était désactivé.
 systemctl enable agentos.service agentos-backup.timer systemd-networkd \
     systemd-resolved nftables ssh 2>/dev/null || true

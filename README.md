@@ -61,6 +61,9 @@ sudo dd if=build/out/agent-os-*.iso of=/dev/sdX bs=4M status=progress conv=fsync
 Démarrer sur la clé, puis `sudo agentos-installer`. Le modèle local dispose
 alors de 11 Gio au lieu de 7, faute de bureau avec qui partager.
 
+Depuis Windows, `outils/creer-cle.ps1` fait tout — téléchargement,
+vérification et écriture — voir [docs/cle-usb.md](docs/cle-usb.md).
+
 Sur une Debian ou une Arch déjà installée, l'ISO n'est pas nécessaire —
 l'installateur détecte la distribution :
 
