@@ -52,9 +52,28 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 # --- image ----------------------------------------------------------------
 
 if ($Image -and (Test-Path $Image)) {
-    Info "image locale : $Image"
-    $iso = (Resolve-Path $Image).Path
+    $chemin = (Resolve-Path $Image).Path
     $attendu = $null
+
+    # GitHub emballe les artéfacts d'Actions dans un ZIP : le fichier
+    # téléchargé depuis l'onglet Actions n'est pas l'image mais une archive
+    # qui la contient. L'écrire telle quelle donnerait une clé illisible.
+    if ($chemin -like "*.zip") {
+        Info "archive détectée, extraction de l'image"
+        $extrait = Join-Path (Split-Path $chemin) ([IO.Path]::GetFileNameWithoutExtension($chemin))
+        Expand-Archive -Path $chemin -DestinationPath $extrait -Force
+        $trouve = Get-ChildItem $extrait -Filter *.iso -Recurse | Select-Object -First 1
+        if (-not $trouve) { Sortir "aucune image ISO dans $chemin" }
+        $chemin = $trouve.FullName
+
+        # L'archive contient aussi la somme de contrôle produite à la
+        # construction : autant s'en servir.
+        $sha = Get-ChildItem $extrait -Filter *.sha256 -Recurse | Select-Object -First 1
+        if ($sha) { $attendu = ((Get-Content $sha.FullName -Raw) -split '\s+')[0] }
+    }
+
+    Info "image locale : $chemin"
+    $iso = $chemin
 } else {
     Info "recherche de la dernière image publiée sur $Depot"
     try {

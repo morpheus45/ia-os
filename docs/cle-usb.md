@@ -23,10 +23,14 @@ La construction demande `debootstrap`, `xorriso` et douze gigaoctets
 libres, donc une machine Debian ou Ubuntu. Depuis Windows, inutile
 d'installer WSL pour cela : le dépôt construit l'image sur GitHub.
 
-Onglet **Actions** → *Image d'installation* → **Run workflow**. Vingt
-minutes plus tard, l'ISO est en pièce jointe du run, avec sa somme de
-contrôle. Le résumé du run affiche le SHA-256 à comparer après
-téléchargement.
+Onglet **Actions** → *Image d'installation* → **Run workflow**. Quelques
+minutes plus tard, l'image est en pièce jointe du run, avec sa somme de
+contrôle. Le résumé du run affiche le SHA-256.
+
+Attention : **GitHub emballe les pièces jointes dans un ZIP.** Le fichier
+téléchargé n'est pas l'image mais une archive qui la contient — l'écrire
+telle quelle donnerait une clé illisible. `creer-cle.ps1` s'en aperçoit et
+extrait l'image tout seul ; à la main, il faut décompresser d'abord.
 
 Une étiquette `v…` poussée sur le dépôt publie en plus une *release*, dont
 le lien de téléchargement est direct et permanent.
