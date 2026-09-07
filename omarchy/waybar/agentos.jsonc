@@ -1,0 +1,20 @@
+// Module agent-os pour la barre d'Omarchy.
+//
+// À fusionner dans ~/.config/waybar/config.jsonc : ajouter cette entrée aux
+// modules, et "custom/agentos" dans "modules-right".
+//
+// L'intervalle de 10 s est un compromis : assez court pour que la barre
+// reflète l'état, assez long pour qu'un aller-retour SSH par tick reste
+// négligeable sur la batterie.
+{
+  "custom/agentos": {
+    "exec": "$HOME/.local/bin/agentos-desktop waybar",
+    "return-type": "json",
+    "interval": 10,
+    "format": "{}",
+    "tooltip": true,
+    "on-click": "$HOME/.local/bin/agentos-desktop menu",
+    "on-click-right": "$HOME/.local/bin/agentos-desktop ask",
+    "on-click-middle": "$HOME/.local/bin/agentos-desktop console"
+  }
+}

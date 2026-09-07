@@ -30,14 +30,35 @@ Postgres quand plusieurs machines doivent partager ce qu'elles savent.
 
 ## Installation
 
+Deux chemins, selon que la machine te sert aussi de poste de travail.
+
+### Sur une machine Omarchy — elle reste ton poste
+
+```bash
+git clone https://github.com/morpheus45/ia-os && cd ia-os/omarchy
+./install.sh
+```
+
+Le service démarre au boot, avant toute session graphique. Le bureau gagne
+un indicateur dans la barre, trois raccourcis et des notifications. Le
+modèle local descend à 7 Gio pour cohabiter avec Hyprland et un
+navigateur — voir [omarchy/README.md](omarchy/README.md).
+
+Fonctionne sur n'importe quel Arch sous Hyprland ; l'intégration de la
+barre suppose la disposition de waybar d'Omarchy.
+
+### Sur une machine dédiée — sans écran, sans bureau
+
 ```bash
 sudo ./build/build-iso.sh                    # produit une ISO amorçable
 sudo dd if=build/out/agent-os-*.iso of=/dev/sdX bs=4M status=progress conv=fsync
 ```
 
-Démarrer sur la clé, puis `sudo agentos-installer`.
+Démarrer sur la clé, puis `sudo agentos-installer`. Le modèle local dispose
+alors de 11 Gio au lieu de 7, faute de bureau avec qui partager.
 
-Sur une Debian déjà installée, l'ISO n'est pas nécessaire :
+Sur une Debian ou une Arch déjà installée, l'ISO n'est pas nécessaire —
+l'installateur détecte la distribution :
 
 ```bash
 sudo ./system/install-system.sh
@@ -50,6 +71,10 @@ Voir [docs/installation.md](docs/installation.md) pour le détail.
 Le projet est dimensionné pour 16 Gio de mémoire vive et un disque de
 500 Go. C'est ce qui explique plusieurs choix qui paraîtraient arbitraires
 autrement.
+
+Ces valeurs concernent la machine dédiée ; sur un poste Omarchy, c'est
+l'installateur d'Omarchy qui partitionne, et agent-os s'installe dans le
+système existant.
 
 | Partition | Taille sur 500 Go | Rôle |
 |---|---|---|
@@ -218,6 +243,7 @@ en clair.
 
 ## Documentation
 
+- [omarchy/README.md](omarchy/README.md) — machine Omarchy, agent intégré au bureau
 - [installation.md](docs/installation.md) — de l'ISO à la première tâche
 - [architecture.md](docs/architecture.md) — les choix et leurs raisons
 - [memoire.md](docs/memoire.md) — modèle de mémoire et recherche

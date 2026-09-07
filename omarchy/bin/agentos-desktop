@@ -1,0 +1,441 @@
+#!/usr/bin/env python3
+"""Intégration d'agent-os au bureau Omarchy.
+
+Le service agent-os tourne sur cette machine, lancé au démarrage, avant et
+indépendamment de toute session graphique. Ce script est ce qui le rend
+visible depuis le bureau : un état dans la barre, un raccourci pour lui
+confier une tâche, une notification quand quelque chose échoue.
+
+Il n'interroge que 127.0.0.1, où l'API écoute. Elle n'a ni TLS ni gestion
+de comptes et n'a pas à en avoir : rien ne sort de la machine.
+
+Le même script sert une machine agent-os distante — il suffit qu'un tunnel
+SSH ramène son port sur la boucle locale et que AGENTOS_SSH soit renseigné
+dans la configuration.
+
+Sous-commandes :
+    waybar   sortie JSON pour la barre, et notifications sur transition
+    ask      invite pour confier une tâche
+    menu     menu Walker des actions courantes
+    check    diagnostic de la liaison
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "agentos/remote.conf"
+ETAT = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "agentos-desktop.json"
+
+#: Terminaux essayés dans l'ordre pour une invite hors TTY. Omarchy en
+#: installe un, mais lequel change selon la version — d'où la détection
+#: plutôt qu'un nom en dur.
+TERMINAUX = ("ghostty", "alacritty", "kitty", "foot", "wezterm", "xterm")
+
+#: Lanceurs de type dmenu, dans l'ordre de préférence sur Omarchy.
+LANCEURS = (
+    ("walker", ["walker", "--dmenu"]),
+    ("fuzzel", ["fuzzel", "--dmenu"]),
+    ("wofi", ["wofi", "--dmenu"]),
+    ("rofi", ["rofi", "-dmenu"]),
+)
+
+ICONE = "󰧑"          # nf-md-brain, présente dans les polices Nerd d'Omarchy
+
+
+# --- configuration --------------------------------------------------------
+
+def lire_config() -> dict[str, str]:
+    """Charge ~/.config/agentos/remote.conf, format KEY=valeur."""
+    valeurs = {
+        "AGENTOS_PORT": "8787",
+        "AGENTOS_TOKEN": "",
+        "AGENTOS_SSH": "",
+        "AGENTOS_NOM": "agent-os",
+        "AGENTOS_SEUIL_LONG_S": "60",
+    }
+    try:
+        for ligne in CONFIG.read_text(encoding="utf-8").splitlines():
+            ligne = ligne.strip()
+            if not ligne or ligne.startswith("#") or "=" not in ligne:
+                continue
+            cle, _, valeur = ligne.partition("=")
+            valeurs[cle.strip()] = valeur.strip().strip('"').strip("'")
+    except (FileNotFoundError, PermissionError, UnicodeDecodeError):
+        pass
+    return valeurs
+
+
+# --- accès à l'API --------------------------------------------------------
+
+class Injoignable(Exception):
+    """Le tunnel est coupé, ou le démon distant est arrêté."""
+
+
+def api(chemin: str, config: dict[str, str], *, payload=None, methode="GET", timeout=5.0):
+    url = f"http://127.0.0.1:{config['AGENTOS_PORT']}{chemin}"
+    entetes = {"Content-Type": "application/json"}
+    if config.get("AGENTOS_TOKEN"):
+        entetes["X-Agentos-Token"] = config["AGENTOS_TOKEN"]
+    corps = json.dumps(payload).encode() if payload is not None else None
+    requete = urllib.request.Request(url, data=corps, headers=entetes, method=methode)
+    # Jamais de proxy vers la boucle locale : sur un poste configuré avec
+    # HTTPS_PROXY, urllib enverrait dehors une requête destinée au tunnel.
+    ouvreur = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with ouvreur.open(requete, timeout=timeout) as reponse:
+            return json.loads(reponse.read() or b"{}")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")[:200]
+        raise Injoignable(f"HTTP {exc.code} : {detail}") from exc
+    except (urllib.error.URLError, OSError, TimeoutError, json.JSONDecodeError) as exc:
+        raise Injoignable(str(exc)) from exc
+
+
+# --- notifications --------------------------------------------------------
+
+def notifier(titre: str, corps: str = "", *, urgence: str = "normal", icone: str = "") -> None:
+    """Envoie une notification à Mako. L'absence de notify-send n'est pas
+    une erreur : la barre reste informative sans lui."""
+    if not shutil.which("notify-send"):
+        return
+    commande = ["notify-send", "-a", "agent-os", "-u", urgence]
+    if icone:
+        commande += ["-i", icone]
+    commande += [titre, corps]
+    subprocess.run(commande, check=False,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+# --- état persistant ------------------------------------------------------
+
+def charger_etat() -> dict:
+    try:
+        return json.loads(ETAT.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, PermissionError):
+        return {}
+
+
+def ecrire_etat(etat: dict) -> None:
+    try:
+        ETAT.parent.mkdir(parents=True, exist_ok=True)
+        # Écriture atomique : la barre lit ce fichier au tour suivant, un
+        # fichier tronqué par une écriture interrompue la ferait repartir
+        # d'un état vide et renotifier tout.
+        provisoire = ETAT.with_suffix(".tmp")
+        provisoire.write_text(json.dumps(etat), encoding="utf-8")
+        provisoire.replace(ETAT)
+    except OSError:
+        pass
+
+
+# --- sous-commande : waybar ----------------------------------------------
+
+def bloc_waybar(texte: str, classe: str, infobulle: str, alt: str = "") -> str:
+    return json.dumps({
+        "text": texte,
+        "class": classe,
+        "tooltip": infobulle,
+        "alt": alt or classe,
+    }, ensure_ascii=False)
+
+
+def commande_waybar(config: dict[str, str]) -> int:
+    ancien = charger_etat()
+    nom = config["AGENTOS_NOM"]
+
+    try:
+        statut = api("/api/status", config)
+    except Injoignable as exc:
+        if ancien.get("joignable", True):
+            # Seulement à la transition : répéter la notification à chaque
+            # tour de barre, soit toutes les dix secondes, transformerait
+            # une panne en harcèlement.
+            notifier(f"{nom} arrêté", str(exc)[:200], urgence="critical")
+        ecrire_etat({"joignable": False})
+        print(bloc_waybar(f"{ICONE} —", "down",
+                          f"{nom} injoignable\n{exc}".strip()))
+        return 0
+
+    ordonnanceur = statut.get("ordonnanceur", {})
+    travaux = ordonnanceur.get("travaux", {}) or {}
+    en_cours = ordonnanceur.get("en_cours", []) or []
+    memoire = statut.get("memoire", {}) or {}
+    distant = statut.get("distant", {}) or {}
+
+    morts = int(travaux.get("dead", 0))
+    actifs = len(en_cours)
+    uids_actifs = {t["uid"]: t.get("depuis_s", 0) for t in en_cours}
+
+    nouvel_etat = {
+        "joignable": True,
+        "morts": morts,
+        "actifs": list(uids_actifs),
+        "vus": {**{u: d for u, d in uids_actifs.items()}},
+    }
+
+    # --- transitions ------------------------------------------------------
+    if not ancien.get("joignable", True):
+        notifier(f"{nom} de retour",
+                 f"{statut.get('noeud', '?')} · debout depuis "
+                 f"{round(statut.get('debout_depuis_s', 0) / 60)} min")
+
+    if morts > int(ancien.get("morts", morts)):
+        combien = morts - int(ancien.get("morts", 0))
+        detail = _detail_echecs(config, combien)
+        notifier(f"{nom} : {combien} travail(s) en échec", detail, urgence="critical")
+
+    termines = set(ancien.get("actifs", [])) - set(uids_actifs)
+    if termines:
+        _notifier_fins(config, termines, ancien, nom)
+
+    ecrire_etat(nouvel_etat)
+
+    # --- rendu ------------------------------------------------------------
+    if morts:
+        classe, texte = "fail", f"{ICONE} {morts}!"
+    elif actifs:
+        classe, texte = "busy", f"{ICONE} {actifs}"
+    else:
+        classe, texte = "ok", ICONE
+
+    lignes = [
+        f"<b>{nom}</b> — {statut.get('noeud', '?')} · v{statut.get('version', '?')}",
+        f"debout depuis {round(statut.get('debout_depuis_s', 0) / 3600, 1)} h",
+        "",
+        f"mémoire : {memoire.get('episodes', 0)} épisodes, {memoire.get('facts', 0)} faits"
+        f" ({memoire.get('bytes', 0) / 1e6:.0f} Mo)",
+    ]
+
+    cerveaux = statut.get("cerveau", {}) or {}
+    actif = next((n for n, i in cerveaux.items() if i.get("actif")), None)
+    if actif:
+        lignes.append(f"cerveau : {actif} ({cerveaux[actif].get('modele', '?')})")
+    ecartes = [n for n, i in cerveaux.items() if i.get("disjoncteur_ouvert")]
+    if ecartes:
+        lignes.append(f"écarté : {', '.join(ecartes)}")
+
+    if travaux:
+        lignes.append("travaux : " + ", ".join(f"{e} {n}" for e, n in sorted(travaux.items())))
+    for tache in en_cours[:3]:
+        lignes.append(f"  en cours depuis {round(tache.get('depuis_s', 0))} s")
+
+    prochain = ordonnanceur.get("prochain")
+    if prochain:
+        lignes.append(f"prochain : {prochain['nom']} dans {prochain['dans_s'] // 60} min")
+
+    if distant.get("actif"):
+        lignes.append(f"distant : {distant.get('en_attente', 0)} en attente")
+
+    print(bloc_waybar(texte, classe, "\n".join(lignes)))
+    return 0
+
+
+def _detail_echecs(config: dict[str, str], combien: int) -> str:
+    """Nomme les travaux morts. Un seul appel supplémentaire, et seulement
+    au moment où quelque chose a effectivement échoué."""
+    try:
+        travaux = api("/api/jobs?state=dead&limit=5", config).get("travaux", [])
+    except Injoignable:
+        return ""
+    return "\n".join(
+        f"{t['name']} : {(t.get('error') or '')[:80]}" for t in travaux[:combien]
+    )
+
+
+def _notifier_fins(config: dict[str, str], termines: set[str], ancien: dict, nom: str) -> None:
+    """Signale la fin des travaux qui ont duré assez pour qu'on les ait oubliés.
+
+    Notifier chaque travail terminé noierait l'utile sous l'entretien
+    périodique, qui tourne toutes les heures et dure une seconde.
+    """
+    seuil = float(config.get("AGENTOS_SEUIL_LONG_S", 60))
+    vus = ancien.get("vus", {}) or {}
+    longs = [uid for uid in termines if float(vus.get(uid, 0)) >= seuil]
+    if not longs:
+        return
+    try:
+        travaux = {t["uid"]: t for t in api("/api/jobs?limit=30", config).get("travaux", [])}
+    except Injoignable:
+        return
+    for uid in longs:
+        tache = travaux.get(uid)
+        if tache is None or tache.get("state") != "done":
+            continue           # les échecs sont déjà signalés par le compteur
+        resultat = (tache.get("result") or "").strip()
+        notifier(f"{nom} : {tache['name']} terminé", resultat[:300])
+
+
+# --- sous-commande : ask --------------------------------------------------
+
+def commande_ask(config: dict[str, str], arguments: list[str]) -> int:
+    tache = " ".join(arguments).strip()
+
+    if not tache and not sys.stdin.isatty():
+        # Lancé depuis un raccourci clavier : pas de terminal pour saisir.
+        # On se relance dans un terminal plutôt que d'utiliser un dmenu, dont
+        # le retour de texte libre non filtré n'est pas fiable d'un lanceur
+        # à l'autre.
+        terminal = next((t for t in TERMINAUX if shutil.which(t)), None)
+        if terminal is None:
+            notifier("agent-os", "aucun terminal trouvé pour saisir la tâche",
+                     urgence="critical")
+            return 1
+        subprocess.Popen([terminal, "-e", sys.argv[0], "ask"],
+                         start_new_session=True)
+        return 0
+
+    if not tache:
+        print(f"Tâche à confier à {config['AGENTOS_NOM']} (Ctrl-C pour annuler) :")
+        try:
+            tache = input("> ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            return 130
+    if not tache:
+        return 1
+
+    try:
+        reponse = api("/api/task", config, methode="POST",
+                      payload={"task": tache, "async": True}, timeout=15)
+    except Injoignable as exc:
+        message = f"impossible de déposer la tâche : {exc}"
+        print(message, file=sys.stderr)
+        notifier("agent-os arrêté", str(exc)[:200], urgence="critical")
+        return 1
+
+    uid = reponse.get("uid", "?")
+    notifier("agent-os : tâche déposée", tache[:200])
+    print(f"déposée sous {uid}")
+    # Laisse le message à l'écran quand un terminal a été ouvert pour
+    # l'occasion et se refermerait aussitôt.
+    if not sys.stdin.isatty():
+        time.sleep(2)
+    return 0
+
+
+# --- sous-commande : menu -------------------------------------------------
+
+ACTIONS = [
+    ("Confier une tâche", ["ask"]),
+    ("État complet", ["check"]),
+    ("Travaux récents", ["jobs"]),
+    ("Ouvrir la console", ["console"]),
+    ("Forcer une synchro", ["sync"]),
+]
+
+
+def commande_menu(config: dict[str, str]) -> int:
+    lanceur = next((cmd for nom, cmd in LANCEURS if shutil.which(nom)), None)
+    if lanceur is None:
+        return commande_check(config)
+
+    entree = "\n".join(libelle for libelle, _ in ACTIONS)
+    try:
+        choix = subprocess.run(lanceur, input=entree, capture_output=True,
+                               text=True, check=False).stdout.strip()
+    except OSError:
+        return commande_check(config)
+
+    for libelle, arguments in ACTIONS:
+        if choix == libelle:
+            return principal(arguments)
+    return 0
+
+
+# --- sous-commandes utilitaires -------------------------------------------
+
+def commande_check(config: dict[str, str]) -> int:
+    distant = bool(config.get("AGENTOS_SSH"))
+    print(f"cible   : 127.0.0.1:{config['AGENTOS_PORT']}"
+          + (f" (tunnel vers {config['AGENTOS_SSH']})" if distant else " (service local)"))
+    print(f"jeton   : {'présent' if config.get('AGENTOS_TOKEN') else 'absent'}")
+    try:
+        statut = api("/api/status", config)
+    except Injoignable as exc:
+        print(f"liaison : ÉCHEC — {exc}")
+        print("\n" + ("Vérifier le tunnel :  ssh -N -L "
+                      f"{config['AGENTOS_PORT']}:127.0.0.1:{config['AGENTOS_PORT']} "
+                      f"{config['AGENTOS_SSH']}" if distant
+                      else "Vérifier le service :  systemctl status agentos"))
+        return 1
+    print(f"liaison : ok — {statut.get('noeud')} v{statut.get('version')}")
+    print(f"mémoire : {statut['memoire']['episodes']} épisodes, "
+          f"{statut['memoire']['facts']} faits")
+    print(f"travaux : {statut['ordonnanceur']['travaux']}")
+    return 0
+
+
+def commande_jobs(config: dict[str, str]) -> int:
+    try:
+        travaux = api("/api/jobs?limit=20", config).get("travaux", [])
+    except Injoignable as exc:
+        print(f"injoignable : {exc}", file=sys.stderr)
+        return 1
+    for tache in travaux:
+        erreur = f" — {tache['error'][:60]}" if tache.get("error") else ""
+        print(f"{tache['state']:<8} {tache['name']:<12} {tache['uid']}{erreur}")
+    return 0
+
+
+def commande_console(config: dict[str, str]) -> int:
+    url = f"http://127.0.0.1:{config['AGENTOS_PORT']}/"
+    ouvreur = next((c for c in ("xdg-open", "omarchy-launch-browser") if shutil.which(c)), None)
+    if ouvreur is None:
+        print(url)
+        return 0
+    subprocess.Popen([ouvreur, url], start_new_session=True)
+    return 0
+
+
+def commande_sync(config: dict[str, str]) -> int:
+    try:
+        rapport = api("/api/sync", config, methode="POST", payload={}, timeout=120)
+    except Injoignable as exc:
+        notifier("agent-os", f"synchro impossible : {exc}"[:200], urgence="critical")
+        return 1
+    resume = (f"{rapport['pousses']} poussé(s), {rapport['tires']} tiré(s), "
+              f"{rapport['conflits']} conflit(s)")
+    notifier("agent-os : synchro terminée", resume)
+    print(resume)
+    return 0
+
+
+# --- point d'entrée -------------------------------------------------------
+
+COMMANDES = {
+    "waybar": lambda c, a: commande_waybar(c),
+    "ask": commande_ask,
+    "menu": lambda c, a: commande_menu(c),
+    "check": lambda c, a: commande_check(c),
+    "jobs": lambda c, a: commande_jobs(c),
+    "console": lambda c, a: commande_console(c),
+    "sync": lambda c, a: commande_sync(c),
+}
+
+
+def principal(argv: list[str]) -> int:
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print(__doc__)
+        return 0
+    commande = COMMANDES.get(argv[0])
+    if commande is None:
+        print(f"sous-commande inconnue : {argv[0]}\n"
+              f"disponibles : {', '.join(COMMANDES)}", file=sys.stderr)
+        return 2
+    return commande(lire_config(), argv[1:])
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(principal(sys.argv[1:]))
+    except KeyboardInterrupt:
+        sys.exit(130)

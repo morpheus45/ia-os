@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+"""Insère le module agent-os dans la configuration de waybar.
+
+Patcher un fichier de configuration écrit à la main est risqué : une
+insertion mal placée casse la barre au prochain démarrage de session,
+c'est-à-dire au pire moment. Trois précautions ici — une sauvegarde
+horodatée, une vérification que le résultat reste analysable, et un refus
+d'écrire si ce n'est pas le cas.
+
+Le format est du JSONC : JSON plus commentaires et virgules traînantes.
+On le lit en retirant ces extensions pour vérifier, mais on écrit
+textuellement, afin de préserver les commentaires et la mise en forme de
+l'utilisateur.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import shutil
+import sys
+import time
+from pathlib import Path
+
+CIBLE = Path.home() / ".config/waybar/config.jsonc"
+MODULE = "custom/agentos"
+
+BLOC = '''  "custom/agentos": {
+    "exec": "$HOME/.local/bin/agentos-desktop waybar",
+    "return-type": "json",
+    "interval": 10,
+    "format": "{}",
+    "tooltip": true,
+    "on-click": "$HOME/.local/bin/agentos-desktop menu",
+    "on-click-right": "$HOME/.local/bin/agentos-desktop ask",
+    "on-click-middle": "$HOME/.local/bin/agentos-desktop console"
+  },
+'''
+
+
+def sans_extensions(texte: str) -> str:
+    """Retire commentaires et virgules traînantes pour permettre l'analyse.
+
+    Les chaînes sont préservées : sans cela, un « // » dans une URL de
+    configuration ferait disparaître la moitié du fichier.
+    """
+    sortie, i, n = [], 0, len(texte)
+    while i < n:
+        car = texte[i]
+        if car == '"':
+            j = i + 1
+            while j < n:
+                if texte[j] == "\\":
+                    j += 2
+                    continue
+                if texte[j] == '"':
+                    break
+                j += 1
+            sortie.append(texte[i:j + 1])
+            i = j + 1
+        elif texte.startswith("//", i):
+            i = texte.find("\n", i)
+            if i == -1:
+                break
+        elif texte.startswith("/*", i):
+            fin = texte.find("*/", i + 2)
+            i = n if fin == -1 else fin + 2
+        else:
+            sortie.append(car)
+            i += 1
+    return re.sub(r",(\s*[}\]])", r"\1", "".join(sortie))
+
+
+def analyser(texte: str):
+    return json.loads(sans_extensions(texte))
+
+
+def inserer(texte: str) -> tuple[str, list[str]]:
+    """Ajoute la définition du module et l'inscrit dans modules-right."""
+    notes: list[str] = []
+
+    if MODULE not in texte:
+        # Insertion juste après l'accolade ouvrante de l'objet racine, où
+        # une définition de module est toujours valide.
+        ouverture = texte.index("{")
+        fin_ligne = texte.find("\n", ouverture) + 1
+        texte = texte[:fin_ligne] + BLOC + texte[fin_ligne:]
+        notes.append("module défini")
+    else:
+        notes.append("module déjà défini, laissé tel quel")
+
+    donnees = analyser(texte)
+    droite = donnees.get("modules-right")
+    if isinstance(droite, list) and MODULE not in droite:
+        # On réécrit la liste textuellement, pour ne pas reformater le
+        # reste du fichier.
+        motif = re.compile(r'("modules-right"\s*:\s*\[)', re.MULTILINE)
+        texte, remplacements = motif.subn(rf'\1\n    "{MODULE}",', texte, count=1)
+        if remplacements:
+            notes.append("ajouté à modules-right")
+        else:
+            notes.append("AJOUT MANUEL REQUIS dans modules-right")
+    elif isinstance(droite, list):
+        notes.append("déjà dans modules-right")
+    else:
+        notes.append("« modules-right » introuvable : ajouter le module à la main")
+
+    return texte, notes
+
+
+def main() -> int:
+    if not CIBLE.exists():
+        print(f"introuvable : {CIBLE}", file=sys.stderr)
+        print("Omarchy n'est peut-être pas installé sur cette machine.", file=sys.stderr)
+        return 1
+
+    original = CIBLE.read_text(encoding="utf-8")
+    try:
+        analyser(original)
+    except json.JSONDecodeError as exc:
+        print(f"{CIBLE} n'est pas analysable en l'état ({exc}) — "
+              "je n'y touche pas.", file=sys.stderr)
+        return 1
+
+    modifie, notes = inserer(original)
+    if modifie == original:
+        print("rien à faire : " + " ; ".join(notes))
+        return 0
+
+    try:
+        analyser(modifie)
+    except json.JSONDecodeError as exc:
+        print(f"le résultat ne serait plus analysable ({exc}) — écriture annulée.",
+              file=sys.stderr)
+        print("Ajouter le module à la main depuis clients/omarchy/waybar/agentos.jsonc.",
+              file=sys.stderr)
+        return 1
+
+    sauvegarde = CIBLE.with_suffix(f".jsonc.bak-{time.strftime('%Y%m%d-%H%M%S')}")
+    shutil.copy2(CIBLE, sauvegarde)
+    CIBLE.write_text(modifie, encoding="utf-8")
+    print(f"waybar mis à jour : {' ; '.join(notes)}")
+    print(f"sauvegarde : {sauvegarde}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

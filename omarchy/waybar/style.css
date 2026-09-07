@@ -1,0 +1,39 @@
+/* Couleurs du module agent-os.
+ *
+ * Aucune couleur en dur : les variables du thème d'Omarchy sont reprises
+ * pour que le module suive le thème choisi au lieu de jurer avec lui.
+ * Seul l'état d'échec force une teinte, parce qu'il doit se voir. */
+
+#custom-agentos {
+  padding: 0 10px;
+  margin: 0 4px;
+}
+
+/* Au repos : discret, à la même intensité que le reste de la barre. */
+#custom-agentos.ok {
+  opacity: 0.85;
+}
+
+/* Au travail : une pulsation lente, pour distinguer d'un coup d'œil une
+   machine qui calcule d'une machine inactive. */
+#custom-agentos.busy {
+  animation: agentos-pulsation 2s ease-in-out infinite;
+}
+
+@keyframes agentos-pulsation {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1.0; }
+}
+
+/* Échec : la seule couleur imposée. Un travail mort ne doit pas se fondre
+   dans le thème. */
+#custom-agentos.fail {
+  color: #e5766c;
+  font-weight: bold;
+}
+
+/* Injoignable : présent mais éteint — on distingue « rien à signaler »
+   de « je ne sais pas ». */
+#custom-agentos.down {
+  opacity: 0.35;
+}

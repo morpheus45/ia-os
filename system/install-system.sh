@@ -11,14 +11,65 @@ set -euo pipefail
 RACINE="${RACINE:-/}"
 SOURCE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 UTILISATEUR="agentos"
-DEST_PY="${RACINE}usr/lib/python3/dist-packages"
+DEST_PY=""   # calculé après l'installation des dépendances, voir plus bas
 
 info()   { printf '\033[36m::\033[0m %s\n' "$*"; }
 succes() { printf '\033[32mok\033[0m %s\n' "$*"; }
+avert()  { printf '\033[33m! \033[0m %s\n' "$*"; }
 erreur() { printf '\033[31méchec\033[0m %s\n' "$*" >&2; exit 1; }
 
 [[ $EUID -eq 0 ]] || erreur "ce script doit être lancé en root"
 [[ -d "$SOURCE/runtime/agentos" ]] || erreur "runtime introuvable dans $SOURCE"
+
+# --- dépendances ----------------------------------------------------------
+# Uniquement en installation directe : quand RACINE désigne un chroot, c'est
+# le constructeur d'image qui a déjà posé les paquets.
+#
+# Les deux bibliothèques sont facultatives et le runtime démarre sans elles,
+# mais dégradé : sans numpy l'index vectoriel est plafonné à vingt mille
+# entrées, et sans cryptography la synchro chiffrée refuse de partir. Mieux
+# vaut les installer que de laisser découvrir la limite plus tard.
+installer_dependances() {
+    if command -v pacman >/dev/null 2>&1; then
+        info "dépendances (pacman)"
+        pacman -S --needed --noconfirm python python-numpy python-cryptography \
+            nftables sqlite || avert "installation partielle des dépendances"
+    elif command -v apt-get >/dev/null 2>&1; then
+        info "dépendances (apt)"
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            python3 python3-numpy python3-cryptography python3-cffi \
+            nftables sqlite3 || avert "installation partielle des dépendances"
+    else
+        avert "gestionnaire de paquets inconnu — installer à la main :
+    python3, numpy, cryptography, nftables"
+    fi
+}
+
+[[ "$RACINE" == "/" ]] && [[ -z "${SANS_DEPENDANCES:-}" ]] && installer_dependances
+
+# --- emplacement des modules Python ---------------------------------------
+# Debian met /usr/lib/python3/dist-packages, Arch /usr/lib/pythonX.Y/
+# site-packages, et la version change à chaque montée de Python. On demande
+# le chemin à l'interpréteur cible plutôt que de le deviner : une valeur en
+# dur donnerait un import qui échoue au premier démarrage, après
+# l'installation, quand plus personne ne regarde.
+#
+# Le calcul vient après l'installation des dépendances, sinon python3
+# pourrait ne pas encore exister sur une machine fraîchement partie.
+repertoire_modules() {
+    local chemin
+    if [[ "$RACINE" == "/" ]]; then
+        chemin="$(python3 -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])' 2>/dev/null)"
+    else
+        chemin="$(chroot "$RACINE" python3 -c \
+            'import sysconfig; print(sysconfig.get_paths()["purelib"])' 2>/dev/null)"
+    fi
+    [[ -n "$chemin" ]] || erreur "python3 introuvable dans ${RACINE} — installer python3 d'abord"
+    printf '%s' "${RACINE%/}$chemin"
+}
+
+DEST_PY="$(repertoire_modules)"
+info "modules Python : $DEST_PY"
 
 # --- compte de service ----------------------------------------------------
 # Un compte système sans interpréteur : il ne sert qu'à faire tourner le
@@ -134,6 +185,23 @@ else
         ln -sf /etc/systemd/system/agentos-backup.timer \
             "${RACINE}etc/systemd/system/timers.target.wants/agentos-backup.timer"
     }
+fi
+
+# --- vérification ---------------------------------------------------------
+# Le seul contrôle qui compte : le module s'importe-t-il vraiment depuis là
+# où on vient de le poser ? Un mauvais répertoire ne se voit pas à
+# l'installation, seulement au premier démarrage du service.
+if [[ "$RACINE" == "/" ]]; then
+    verificateur=(python3)
+else
+    verificateur=(chroot "$RACINE" python3)
+fi
+if version="$("${verificateur[@]}" -c 'import agentos; print(agentos.__version__)' 2>&1)"; then
+    succes "module importable, version $version"
+else
+    erreur "le module n'est pas importable depuis $DEST_PY :
+    $version
+Vérifier que ce répertoire est bien sur le sys.path de python3."
 fi
 
 succes "agent-os installé"
