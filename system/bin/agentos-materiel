@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+# Rapport matériel, et verdict sur ce que cette machine peut faire tourner.
+#
+# À lancer depuis la session live, avant d'installer quoi que ce soit. Il
+# répond à trois questions : le réseau marche-t-il, les disques sont-ils
+# vus, et quel modèle local cette machine peut-elle héberger.
+
+set -uo pipefail
+
+titre()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
+ligne()  { printf '  %-22s %s\n' "$1" "$2"; }
+ok()     { printf '  \033[32mok\033[0m    %s\n' "$*"; }
+avert()  { printf '  \033[33mavert\033[0m %s\n' "$*"; }
+souci()  { printf '  \033[31msouci\033[0m %s\n' "$*"; }
+
+# --- processeur -----------------------------------------------------------
+
+titre "Processeur"
+modele="$(grep -m1 '^model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//')"
+coeurs="$(nproc)"
+ligne "modèle" "$modele"
+ligne "cœurs logiques" "$coeurs"
+
+drapeaux="$(grep -m1 '^flags' /proc/cpuinfo)"
+# Initialisation explicite : sous « set -u », un tableau jamais affecté fait
+# échouer le script — précisément sur les processeurs anciens, où ce
+# diagnostic serait le plus utile.
+presents=()
+for jeu in avx2 avx512f f16c; do
+    case "$drapeaux" in *" $jeu"*) presents+=("$jeu") ;; esac
+done
+ligne "extensions SIMD" "${presents[*]:-aucune}"
+
+# AVX2 double environ la vitesse de llama.cpp. Sans lui, un modèle local
+# reste utilisable mais devient pénible.
+case "$drapeaux" in
+    *" avx2"*) ok "AVX2 présent : un modèle local tournera à vitesse normale" ;;
+    *) avert "pas d'AVX2 : un modèle local sera environ deux fois plus lent" ;;
+esac
+
+# --- mémoire --------------------------------------------------------------
+
+titre "Mémoire"
+mo_total=$(( $(awk '/MemTotal/{print $2}' /proc/meminfo) / 1024 ))
+ligne "installée" "$((mo_total / 1024)) Gio"
+
+# Le calcul suit les bornes posées par l'installation : 2 Gio au runtime,
+# le reste au modèle une fois le système servi.
+if   (( mo_total < 3500 )); then souci "moins de 4 Gio : insuffisant, même sans modèle local"
+elif (( mo_total < 7500 )); then avert "4 à 8 Gio : API Claude seulement, pas de modèle local"
+elif (( mo_total < 15000 )); then ok "8 à 16 Gio : modèle local de 7 milliards de paramètres en 4 bits"
+else ok "16 Gio ou plus : modèle de 7 à 14 milliards selon le reste de la charge"
+fi
+
+# --- disques --------------------------------------------------------------
+
+titre "Disques"
+if command -v lsblk >/dev/null; then
+    lsblk -dpno NAME,SIZE,MODEL,ROTA,TRAN 2>/dev/null | while read -r nom taille reste; do
+        printf '  %-14s %-8s %s\n' "$nom" "$taille" "$reste"
+    done
+fi
+plus_gros=$(lsblk -dbno SIZE,TYPE 2>/dev/null | awk '$2=="disk"{if($1>m)m=$1}END{print int(m/1024/1024/1024)}')
+ligne "plus grand disque" "${plus_gros:-?} Go"
+if (( ${plus_gros:-0} >= 120 )); then
+    ok "assez grand pour une installation (120 Go minimum)"
+else
+    avert "aucun disque de 120 Go : l'installateur refusera"
+fi
+
+# --- amorçage -------------------------------------------------------------
+
+titre "Amorçage"
+if [[ -d /sys/firmware/efi ]]; then
+    ligne "mode" "UEFI"
+    secure="$(od -An -t u1 -j4 /sys/firmware/efi/efivars/SecureBoot-* 2>/dev/null | tr -d ' ')"
+    case "$secure" in
+        1) souci "Secure Boot ACTIF — cette clé n'aurait pas dû démarrer, mais l'installé ne démarrera pas" ;;
+        0) ok "Secure Boot désactivé" ;;
+        *) ligne "Secure Boot" "indéterminé" ;;
+    esac
+else
+    ligne "mode" "BIOS / CSM"
+    ok "amorçage hérité : l'installateur posera GRUB sur le MBR"
+fi
+
+# --- réseau ---------------------------------------------------------------
+
+titre "Réseau"
+trouve=0
+for chemin in /sys/class/net/*; do
+    interface="$(basename "$chemin")"
+    [[ "$interface" == lo ]] && continue
+    trouve=1
+    pilote="$(basename "$(readlink -f "$chemin/device/driver" 2>/dev/null)" 2>/dev/null)"
+    etat="$(cat "$chemin/operstate" 2>/dev/null)"
+    adresse="$(ip -4 -o addr show "$interface" 2>/dev/null | awk '{print $4}' | head -1)"
+    printf '  %-10s pilote %-12s %-6s %s\n' "$interface" "${pilote:-aucun}" "$etat" "${adresse:-sans adresse}"
+done
+(( trouve )) || souci "aucune interface réseau détectée : micrologiciel manquant ?"
+
+if ip -4 route show default >/dev/null 2>&1 && [[ -n "$(ip -4 route show default)" ]]; then
+    ok "route par défaut présente"
+else
+    avert "pas de route par défaut — brancher un câble, ou configurer le Wi-Fi"
+fi
+
+# --- micrologiciels -------------------------------------------------------
+
+titre "Micrologiciels"
+# kernel.dmesg_restrict vaut 1 sur ce système : sans root, le journal du
+# noyau est illisible. Le dire, plutôt que d'annoncer « rien à signaler »
+# après n'avoir rien pu regarder — un contrôle qui ment est pire qu'un
+# contrôle absent.
+if journal="$(dmesg 2>/dev/null)" && [[ -n "$journal" ]]; then
+    # grep -c écrit « 0 » et sort en code 1 quand il ne trouve rien : le
+    # « || echo 0 » naïf produit alors deux zéros et casse l'arithmétique.
+    manquants="$(printf '%s\n' "$journal" \
+        | grep -icE 'firmware.*(failed|not found|missing)')" || manquants=0
+    if (( manquants > 0 )); then
+        souci "$manquants message(s) de micrologiciel manquant :"
+        printf '%s\n' "$journal" \
+            | grep -iE 'firmware.*(failed|not found|missing)' | tail -5 | sed 's/^/        /'
+    else
+        ok "aucun micrologiciel réclamé par le noyau"
+    fi
+else
+    avert "journal du noyau illisible sans root — relancer avec :
+        sudo agentos-materiel"
+fi
+
+# --- verdict --------------------------------------------------------------
+
+titre "En résumé"
+echo "  Si le réseau et les disques sont vus ci-dessus, cette machine peut"
+echo "  faire tourner agent-os. Pour installer :"
+echo
+echo "      sudo agentos-installer --simulation   # afficher le plan"
+echo "      sudo agentos-installer                # EFFACE le disque choisi"
+echo

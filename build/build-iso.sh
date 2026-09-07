@@ -16,6 +16,9 @@ ICI="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RACINE_PROJET="$(cd "$ICI/.." && pwd)"
 
 SUITE="${SUITE:-trixie}"
+# large (défaut) : couvre Wi-Fi, Ethernet, GPU et microcode.
+# aucun          : image minimale, pour machine virtuelle uniquement.
+MICROLOGICIELS="${MICROLOGICIELS:-large}"
 MIROIR="${MIROIR:-http://deb.debian.org/debian}"
 ARCH="${ARCH:-amd64}"
 TRAVAIL="${TRAVAIL:-$ICI/work}"
@@ -109,6 +112,19 @@ EOF
 # --- paquets --------------------------------------------------------------
 
 paquets="$(grep -vE '^\s*(#|$)' "$ICI/config/packages.list" | tr '\n' ' ')"
+
+# Les micrologiciels sont dans une liste à part : ils pèsent plus que tout
+# le reste du système et certains voudront les alléger. Le défaut est la
+# couverture large, parce qu'une image qui démarre sans Wi-Fi sur la
+# machine à tester ne sert à rien.
+case "${MICROLOGICIELS:-large}" in
+    aucun|none)
+        avert "construction sans micrologiciel : pas de Wi-Fi ni de microcode
+    sur matériel réel — réservé aux machines virtuelles" ;;
+    *)
+        paquets="$paquets $(grep -vE '^\s*(#|$)' "$ICI/config/firmware.list" | tr '\n' ' ')" ;;
+esac
+
 info "installation des paquets"
 chroot "$CHROOT" /bin/bash -eux <<EOF
 export DEBIAN_FRONTEND=noninteractive LC_ALL=C LANG=C
@@ -178,9 +194,9 @@ cat <<'BANNIERE'
 
   agent-os — image d'installation
 
+  Vérifier le matériel :      agentos-materiel
   Installer sur le disque :   sudo agentos-installer
   Documentation :             /usr/share/doc/agent-os/
-  Vérifier le matériel :      lsblk ; ip addr ; free -h
 
 BANNIERE
 EOL

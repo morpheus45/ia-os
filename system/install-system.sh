@@ -93,7 +93,8 @@ find "$DEST_PY/agentos" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/de
 chmod -R a+rX "$DEST_PY/agentos"
 
 info "installation des exécutables"
-install -D -m 0755 "$SOURCE/system/bin/agentos-backup" "${RACINE}usr/local/bin/agentos-backup"
+install -D -m 0755 "$SOURCE/system/bin/agentos-backup"  "${RACINE}usr/local/bin/agentos-backup"
+install -D -m 0755 "$SOURCE/system/bin/agentos-materiel" "${RACINE}usr/local/bin/agentos-materiel"
 cat > "${RACINE}usr/local/bin/agentosctl" <<'EOF'
 #!/usr/bin/python3
 import sys

@@ -121,10 +121,18 @@ premier essai : il vérifie que le matériel est reconnu — réseau, disque,
 clavier — sans engager quoi que ce soit.
 
 ```bash
-ip addr          # la carte réseau est-elle vue ?
-lsblk            # les disques sont-ils vus ?
-free -h          # la mémoire annoncée est-elle là ?
+sudo agentos-materiel
 ```
+
+Ce rapport dit, en une page : le processeur et ses extensions SIMD, la
+mémoire et le modèle local qu'elle permet, les disques et leur taille, le
+mode d'amorçage et l'état du Secure Boot, chaque interface réseau avec son
+pilote et son adresse, et tout micrologiciel que le noyau a réclamé sans
+l'obtenir. Le lancer avec `sudo` : le journal du noyau est illisible
+autrement.
+
+Les trois lignes qui décident : une interface réseau avec un pilote et une
+adresse, un disque d'au moins 120 Go, et aucun micrologiciel manquant.
 
 *Installer agent-os* lance `agentos-installer`, qui **efface entièrement le
 disque choisi**. Il refuse le disque portant le système en cours

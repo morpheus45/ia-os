@@ -1,0 +1,28 @@
+# Micrologiciels embarqués dans l'image.
+#
+# Sans eux, sur du matériel réel : pas de Wi-Fi — Intel, Realtek, Broadcom
+# et Qualcomm en ont tous besoin — certaines cartes Ethernet muettes, aucun
+# microcode processeur, et un amdgpu qui refuse de s'initialiser, ce qui
+# donne un écran noir après le menu d'amorçage.
+#
+# Une machine virtuelle ne révèle jamais ce manque : ses périphériques
+# virtuels n'ont besoin d'aucun micrologiciel. Il ne se voit qu'au premier
+# démarrage sur une vraie machine, et il s'y voit brutalement.
+#
+# Coût : environ 348 Mo installés, nettement moins une fois compressés en
+# squashfs. Pour une image dont le rôle est de démarrer sur un PC inconnu,
+# c'est le bon arbitrage. Alléger : MICROLOGICIELS=aucun ./build-iso.sh
+
+# Microcode processeur : corrige des errata matériels et des failles de
+# canal auxiliaire. Petit, et il n'y a aucune raison de s'en passer.
+intel-microcode
+amd64-microcode
+
+# Métapaquet Debian : tire firmware-linux-free, firmware-linux-nonfree,
+# firmware-misc-nonfree, firmware-realtek et firmware-amd-graphics.
+firmware-linux
+
+# Wi-Fi, non couverts par le métapaquet.
+firmware-iwlwifi
+firmware-atheros
+firmware-brcm80211

@@ -230,6 +230,24 @@ second chiffre la mémoire avant envoi. En leur absence, l'index est
 plafonné et la synchro chiffrée refuse de démarrer — plutôt que de partir
 en clair.
 
+## Vérifier une machine avant d'installer
+
+Depuis la session live :
+
+```bash
+sudo agentos-materiel
+```
+
+Il rapporte processeur, mémoire, disques, mode d'amorçage, interfaces
+réseau avec leur pilote, et tout micrologiciel réclamé sans succès — puis
+dit quel modèle local cette machine peut héberger.
+
+L'image embarque les micrologiciels Wi-Fi, Ethernet, GPU et le microcode
+processeur : sans eux, une machine réelle démarre sans réseau, et certains
+GPU AMD ne s'initialisent pas du tout. C'est ce qui fait passer l'image de
+308 à 473 Mo. Pour une machine virtuelle, où rien de tout cela ne sert :
+`MICROLOGICIELS=aucun sudo ./build/build-iso.sh`.
+
 ## Limites connues
 
 - Un modèle local sur processeur est lent. C'est un repli, pas un équivalent.
