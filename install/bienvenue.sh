@@ -182,6 +182,14 @@ choisir_disque() {
 # tous les disques de la même façon. Là, seul l'utilisateur sait.
 OPTION_SUPPORT=""
 
+# L'assistant peut se retrouver devant un installateur plus ancien que lui :
+# il se télécharge à l'unité, l'image se grave une fois pour toutes. Lui
+# passer une option qu'il ne connaît pas le ferait échouer sur « option
+# inconnue » sans que personne comprenne pourquoi.
+installateur_gere_support() {
+    agentos-installer --aide 2>/dev/null | grep -q -- '--externe'
+}
+
 determiner_support() {
     local disque="$1" transport
     transport="$(lsblk -dno TRAN "$disque" 2>/dev/null | head -1)"
@@ -221,6 +229,33 @@ determiner_support() {
     fi
 }
 
+# Renvoie 1 quand il vaut mieux ne rien écrire du tout.
+verifier_accord_installateur() {
+    installateur_gere_support && return 0
+
+    # L'installateur est ancien : il déduira lui-même, et il déduit bien
+    # partout sauf dans une machine virtuelle. Là, et seulement là, le
+    # résultat est un système qui ne démarrera pas.
+    if [[ "$OPTION_SUPPORT" == "--externe" ]]; then
+        titre "Cette image est trop ancienne pour ce disque"
+        danger "L'installateur de cette image ne sait pas qu'on peut lui"
+        danger "désigner un disque externe."
+        echo
+        info "Il déduira « interne » — la machine virtuelle ne lui montre rien"
+        info "d'autre — et le système installé s'arrêtera au premier démarrage"
+        info "sur « ALERT! UUID=... does not exist »."
+        echo
+        info "Récupérer une image récente, ou installer depuis une clé USB"
+        info "démarrée sur l'ordinateur : là, la déduction est juste."
+        echo
+        oui "Installer quand même, en sachant que ça ne démarrera pas ?" \
+            || return 1
+    fi
+
+    OPTION_SUPPORT=""
+    return 0
+}
+
 # --- installation ---------------------------------------------------------
 
 lancer_installation() {
@@ -239,11 +274,12 @@ lancer_installation() {
     fi
 
     determiner_support "$disque"
+    verifier_accord_installateur || { pause; return 0; }
 
     titre "Plan d'installation"
     atone "Rien n'est écrit à cette étape."
     echo
-    sudo agentos-installer -d "$disque" "$OPTION_SUPPORT" --simulation
+    sudo agentos-installer -d "$disque" ${OPTION_SUPPORT:+"$OPTION_SUPPORT"} --simulation
     local code=$?
     if (( code != 0 )); then
         echo
@@ -265,7 +301,7 @@ lancer_installation() {
     fi
 
     titre "Installation"
-    sudo agentos-installer -d "$disque" "$OPTION_SUPPORT"
+    sudo agentos-installer -d "$disque" ${OPTION_SUPPORT:+"$OPTION_SUPPORT"}
     code=$?
     echo
     if (( code != 0 )); then
