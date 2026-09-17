@@ -50,6 +50,15 @@ L'image est hybride : elle démarre en BIOS comme en UEFI.
 Démarrer sur la clé. La session s'ouvre seule sur un compte `live`, sans
 mot de passe — l'image sert à installer, pas à travailler.
 
+L'assistant s'ouvre avec elle : il liste les disques par taille et par
+modèle, écarte le support de démarrage, signale ceux qui portent Windows
+et ceux qui sont trop petits, montre le plan et attend une confirmation.
+Personne ne devrait avoir à connaître le nom Linux de son disque pour
+installer un système.
+
+Le choix **4) Ouvrir un terminal** rend la main ; `agentos-bienvenue`
+relance l'assistant. Pour piloter l'installateur directement :
+
 ```bash
 sudo agentos-installer --simulation    # afficher le plan sans rien écrire
 sudo agentos-installer
@@ -63,6 +72,19 @@ se verrait qu'une fois le partitionnement fait.
 Il demande ensuite un compte d'administration et une clé SSH publique.
 **Sans clé, l'accès distant sera impossible** : le système refuse
 l'authentification par mot de passe.
+
+### Disque interne ou débranchable
+
+Un disque externe reçoit `rootdelay=5` et perd l'hibernation : sans le
+délai, l'initramfs cherche la racine avant que le disque USB ne se soit
+annoncé et tombe dans un shell de secours ; et reprendre une hibernation
+depuis un disque qu'on peut débrancher corrompt le système de fichiers.
+
+Démarré depuis une clé, l'installateur reconnaît le support tout seul.
+Depuis une machine virtuelle, non : l'hyperviseur présente le disque brut
+en SATA quel que soit son branchement réel. `--externe` et `--interne`
+tranchent à la main ; `--simulation` indique si la nature retenue est
+`déclaré` ou `déduit`.
 
 ### Chiffrer la mémoire
 

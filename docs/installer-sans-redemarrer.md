@@ -60,13 +60,24 @@ Le script liste les disques en marquant celui qui porte Windows, refuse
 de l'écraser, demande confirmation, met le disque choisi hors ligne, crée
 la machine virtuelle en UEFI et la démarre.
 
-Dans la fenêtre qui s'ouvre :
+Dans la fenêtre qui s'ouvre, l'assistant démarre tout seul. Choisir
+**1) Installer agent-os sur un disque**, puis le disque dans la liste.
+
+Il demande lui-même si le disque est externe, parce qu'il détecte qu'il
+tourne dans une machine virtuelle et sait qu'il ne peut pas le deviner —
+répondre **oui** pour un HDD branché en USB. Il affiche ensuite le plan,
+attend une confirmation, et rien n'est écrit avant.
+
+Pour piloter l'installateur à la main :
 
 ```bash
-sudo agentos-materiel                  # ce que la machine voit
-sudo agentos-installer --simulation    # le plan, sans rien écrire
-sudo agentos-installer                 # installer
+sudo agentos-materiel                            # ce que la machine voit
+sudo agentos-installer --externe --simulation    # le plan, sans rien écrire
+sudo agentos-installer --externe                 # installer
 ```
+
+`--externe` n'est pas facultative ici : voir
+[Particularités d'un disque externe](#particularités-dun-disque-externe).
 
 Le disque à choisir est `/dev/sda`. **Vérifier qu'il affiche la taille de
 ton disque physique** — c'est le seul contrôle qui garantit qu'on ne vise
@@ -94,7 +105,7 @@ sans message.
 
 ## Particularités d'un disque externe
 
-L'installateur détecte un support USB et adapte deux réglages :
+Un disque débranchable exige deux réglages qu'un disque interne n'a pas :
 
 - **`rootdelay=5`** — un disque USB met plusieurs secondes à s'annoncer au
   noyau. Sans ce délai, l'initramfs cherche la racine avant qu'elle
@@ -103,6 +114,23 @@ L'installateur détecte un support USB et adapte deux réglages :
 - **Pas d'hibernation** — reprendre depuis une image écrite sur un disque
   qu'on peut débrancher est impossible, et remonter ensuite ce disque dans
   l'état où l'hibernation l'a laissé corrompt le système de fichiers.
+
+Démarré depuis une clé, l'installateur reconnaît un disque USB tout seul.
+**Depuis une machine virtuelle, il ne le peut pas** : VirtualBox présente
+le disque brut au système invité comme un disque SATA, quel que soit son
+branchement réel. La déduction conclurait « interne », et le système
+installé s'arrêterait au premier démarrage sur le vrai ordinateur.
+
+D'où l'option `--externe`, que `installer-vm.ps1` affiche de lui-même
+quand Windows rapporte un bus USB — Windows, lui, connaît le vrai
+branchement. `--simulation` annonce la nature retenue :
+
+```
+Support     : externe — délai de démarrage, pas d'hibernation (déclaré)
+```
+
+`déclaré` signifie que la nature vient de l'option, `déduit` qu'elle vient
+du noyau. Dans une machine virtuelle, seul `déclaré` est fiable.
 
 Un disque dur externe ou un SSD convient. Une clé USB ordinaire non : sa
 mémoire flash n'a ni cache ni bonne répartition de l'usure, et la mémoire
