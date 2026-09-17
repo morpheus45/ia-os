@@ -43,9 +43,18 @@ disque de la même façon.
 
 ```powershell
 # PowerShell EN ADMINISTRATEUR
+cd $env:USERPROFILE\Downloads
+Set-ExecutionPolicy -Scope Process Bypass -Force
 irm https://raw.githubusercontent.com/morpheus45/ia-os/main/outils/installer-vm.ps1 -OutFile installer-vm.ps1
-.\installer-vm.ps1 -Image "$env:USERPROFILE\Downloads\agent-os.iso"
+Unblock-File .\installer-vm.ps1
+.\installer-vm.ps1 -Image ".\agent-os.iso"
 ```
+
+`Set-ExecutionPolicy -Scope Process` n'assouplit la règle que pour cette
+fenêtre, et `Unblock-File` retire la marque que Windows appose sur les
+fichiers venus d'Internet. Sans ces deux lignes, PowerShell refuse le
+script. Ne pas se placer dans `C:\WINDOWS\system32`, où PowerShell
+s'ouvre par défaut en administrateur.
 
 Le script liste les disques en marquant celui qui porte Windows, refuse
 de l'écraser, demande confirmation, met le disque choisi hors ligne, crée

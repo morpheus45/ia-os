@@ -5,9 +5,16 @@
 Depuis PowerShell **en administrateur**, sur le PC où la clé est branchée :
 
 ```powershell
+cd $env:USERPROFILE\Downloads
+Set-ExecutionPolicy -Scope Process Bypass -Force
 irm https://raw.githubusercontent.com/morpheus45/ia-os/main/outils/creer-cle.ps1 -OutFile creer-cle.ps1
+Unblock-File .\creer-cle.ps1
 .\creer-cle.ps1
 ```
+
+`Set-ExecutionPolicy -Scope Process` n'assouplit la règle que pour cette
+fenêtre : sans cela Windows refuse tout script téléchargé, et le réglage
+revient de lui-même à la fermeture.
 
 Le script télécharge la dernière image publiée, vérifie sa somme de
 contrôle, liste les disques en signalant celui qui porte Windows, demande
@@ -34,6 +41,40 @@ extrait l'image tout seul ; à la main, il faut décompresser d'abord.
 
 Une étiquette `v…` poussée sur le dépôt publie en plus une *release*, dont
 le lien de téléchargement est direct et permanent.
+
+## PowerShell refuse d'exécuter le script
+
+```
+.\creer-cle.ps1 : Impossible de charger le fichier …, car l'exécution de
+scripts est désactivée sur ce système.
+```
+
+Windows bloque par défaut tout script téléchargé. Deux choses à faire, et
+une à éviter.
+
+**Ne pas travailler dans `C:\WINDOWS\system32`.** C'est le dossier où
+PowerShell s'ouvre quand on le lance en administrateur, et y déposer des
+fichiers est une mauvaise habitude. Se placer ailleurs.
+
+**Autoriser les scripts pour cette fenêtre seulement.** `-Scope Process`
+ne touche ni la machine ni ton compte : le réglage disparaît à la
+fermeture de la fenêtre.
+
+```powershell
+cd $env:USERPROFILE\Downloads
+Set-ExecutionPolicy -Scope Process Bypass -Force
+irm https://raw.githubusercontent.com/morpheus45/ia-os/main/outils/creer-cle.ps1 -OutFile creer-cle.ps1
+Unblock-File .\creer-cle.ps1
+.\creer-cle.ps1 -Image ".\agent-os-trixie-amd64-20260917.iso.zip"
+```
+
+`Unblock-File` retire la marque que Windows appose sur tout fichier venu
+d'Internet ; sans elle, certains réglages de sécurité bloquent le script
+même avec la politique assouplie.
+
+Ne pas utiliser `Set-ExecutionPolicy Unrestricted` sans `-Scope Process` :
+cela abaisse durablement la sécurité de la machine, pour un script qu'on
+n'exécute qu'une fois.
 
 ## D'abord, ce qui bloque tout le monde
 
