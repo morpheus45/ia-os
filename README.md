@@ -253,6 +253,21 @@ démarrage. Retirer la clé ne laisse aucune trace.
 `--memoire-seule` ne persiste que l'état de l'agent, laissant le système
 en lecture seule : plus rapide et impossible à casser durablement.
 
+### Depuis Windows, sans redémarrer
+
+Une machine virtuelle reçoit l'accès brut au disque visé, y démarre
+l'image, et l'installateur écrit sur le vrai disque pendant que Windows
+continue de tourner :
+
+```powershell
+.\outils\installer-vm.ps1 -Image agent-os.iso   # PowerShell administrateur
+```
+
+Voir [docs/installer-sans-redemarrer.md](docs/installer-sans-redemarrer.md).
+Le mode d'amorçage de la machine virtuelle doit être celui du PC — c'est
+le seul point qui ruine l'opération s'il est manqué, et rien ne le
+signale avant l'échec.
+
 ### Second disque — un système à part, choisi au démarrage
 
 Sur une machine à deux disques physiques, installer sur le second :
@@ -315,6 +330,7 @@ GPU AMD ne s'initialisent pas du tout. C'est ce qui fait passer l'image de
 
 - [omarchy/README.md](omarchy/README.md) — machine Omarchy, agent intégré au bureau
 - [cle-usb.md](docs/cle-usb.md) — obtenir l'image et l'écrire sur une clé, depuis Windows
+- [installer-sans-redemarrer.md](docs/installer-sans-redemarrer.md) — installer depuis Windows, par machine virtuelle
 - [installation.md](docs/installation.md) — de l'ISO à la première tâche
 - [architecture.md](docs/architecture.md) — les choix et leurs raisons
 - [memoire.md](docs/memoire.md) — modèle de mémoire et recherche

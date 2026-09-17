@@ -157,6 +157,9 @@ cat <<EOF
   Mémoire vive: $(go $mio_ram)
   Machine     : $NOM_MACHINE
   Chiffrement : $([[ $CHIFFRER -eq 1 ]] && echo "oui (LUKS2 sur la mémoire)" || echo non)
+  Support     : $([[ "$(lsblk -dno TRAN "$CIBLE" 2>/dev/null | head -1)" == usb ]] \
+                  && echo "externe (USB) — délai de démarrage, pas d'hibernation" \
+                  || echo "interne")
 
   Partitionnement prévu :
 
@@ -307,6 +310,26 @@ EOF
 
 # --- amorçage -------------------------------------------------------------
 
+# --- particularités d'un disque externe -----------------------------------
+# Un disque USB met plusieurs secondes à s'annoncer au noyau. Sans délai,
+# l'initramfs cherche la racine avant qu'elle n'existe et tombe dans un
+# shell de secours sur « ALERT! UUID=… does not exist » — panne classique,
+# et parfaitement déroutante puisque le disque est bien branché.
+#
+# L'hibernation, elle, n'a pas de sens sur un support débranchable :
+# reprendre depuis une image écrite sur un disque absent est impossible, et
+# monter ensuite ce disque dans l'état où l'hibernation l'a laissé corrompt
+# le système de fichiers. On retire donc « resume= » plutôt que de laisser
+# une bombe à retardement.
+
+transport_cible="$(lsblk -dno TRAN "$CIBLE" 2>/dev/null | head -1)"
+if [[ "$transport_cible" == "usb" ]]; then
+    parametres_noyau="rootdelay=5"
+    avert "disque externe : délai d'attente du noyau ajouté, hibernation désactivée"
+else
+    parametres_noyau="resume=UUID=$(blkid -s UUID -o value "$P_SWAP")"
+fi
+
 info "installation de GRUB"
 for point in dev dev/pts proc sys; do
     mount --bind "/$point" "$CIBLE_MNT/$point"
@@ -341,13 +364,12 @@ systemctl enable agentos.service agentos-backup.timer systemd-networkd \
 systemctl enable agentos-model.service 2>/dev/null || true
 
 sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=3/' /etc/default/grub 2>/dev/null || true
-# resume= pointe le swap : sans lui l'hibernation écrit l'image mais ne sait
-# pas où la relire au démarrage suivant.
 cat >> /etc/default/grub <<'EOL'
 GRUB_CMDLINE_LINUX_DEFAULT="quiet"
 GRUB_DISABLE_OS_PROBER=true
 EOL
-sed -i "s|^GRUB_CMDLINE_LINUX=.*|GRUB_CMDLINE_LINUX=\"resume=UUID=$(blkid -s UUID -o value $P_SWAP)\"|" /etc/default/grub
+# Calculé plus haut selon que la cible est interne ou débranchable.
+sed -i "s|^GRUB_CMDLINE_LINUX=.*|GRUB_CMDLINE_LINUX=\"$parametres_noyau\"|" /etc/default/grub
 
 if [ -d /sys/firmware/efi ]; then
     # --removable place l'amorceur au chemin générique EFI/BOOT/BOOTX64.EFI,
