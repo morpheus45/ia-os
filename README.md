@@ -233,6 +233,51 @@ second chiffre la mémoire avant envoi. En leur absence, l'index est
 plafonné et la synchro chiffrée refuse de démarrer — plutôt que de partir
 en clair.
 
+## Garder ta machine intacte
+
+Deux façons d'utiliser agent-os sans rien changer à l'ordinateur qui
+l'accueille.
+
+### Mémoire sur la clé — rien n'est écrit sur la machine
+
+```bash
+sudo agentos-persistance
+```
+
+Crée, dans l'espace libre resté sur la clé après l'image, une partition
+que le système superpose à chaque démarrage. La mémoire de l'agent, ses
+secrets et ses réglages survivent aux redémarrages ; l'ordinateur n'est
+touché en rien — ni partition, ni secteur d'amorçage, ni ordre de
+démarrage. Retirer la clé ne laisse aucune trace.
+
+`--memoire-seule` ne persiste que l'état de l'agent, laissant le système
+en lecture seule : plus rapide et impossible à casser durablement.
+
+### Second disque — un système à part, choisi au démarrage
+
+Sur une machine à deux disques physiques, installer sur le second :
+
+```bash
+sudo agentos-installer --simulation    # montre le plan, n'écrit rien
+sudo agentos-installer
+```
+
+L'amorceur est posé sur la partition EFI **de ce disque**, avec
+`--removable --no-nvram` : rien n'est écrit dans la mémoire de la carte
+mère. L'ordinateur redémarre sur son système habituel, et agent-os
+n'apparaît que si on le choisit dans le menu d'amorçage du micrologiciel
+— F12 chez Dell et Lenovo, F9 chez HP.
+
+L'installateur montre le contenu du disque visé avant toute écriture et
+avertit s'il y trouve des partitions Windows. **Attention** : une lettre
+Windows désigne une partition, pas un disque. Si `D:` et `C:` portent le
+même numéro de disque, ils partagent le même support physique et
+installer sur `D:` détruirait Windows. Vérifier depuis Windows :
+
+```powershell
+Get-Partition | Select DiskNumber, DriveLetter, Size
+```
+
 ## Vérifier une machine avant d'installer
 
 Depuis la session live :

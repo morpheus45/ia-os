@@ -101,6 +101,36 @@ fi
 
 # --- calcul du plan -------------------------------------------------------
 
+# --- ce que contient le disque visé ---------------------------------------
+# Une lettre Windows désigne une partition, pas un disque : quelqu'un qui
+# vise « D: » peut se retrouver à effacer le disque qui porte aussi C:.
+# Cette inspection vient AVANT la sortie du mode simulation — un mode fait
+# pour vérifier sans risque qui tairait le principal danger ne servirait à
+# rien.
+
+contenu="$(lsblk -no NAME,SIZE,FSTYPE,LABEL "$CIBLE" 2>/dev/null | tail -n +2)"
+windows=0
+if lsblk -no FSTYPE "$CIBLE" 2>/dev/null | grep -qi ntfs; then windows=1; fi
+if lsblk -no PARTTYPENAME "$CIBLE" 2>/dev/null | grep -qi "microsoft"; then windows=1; fi
+
+if [[ -n "$contenu" ]]; then
+    avert "ce disque contient déjà :"
+    echo "$contenu" | sed 's/^/      /'
+else
+    info "ce disque ne contient aucune partition"
+fi
+
+if (( windows )); then
+    echo
+    avert "CE DISQUE CONTIENT DES PARTITIONS WINDOWS."
+    avert "Si c'est le disque de ton système, Windows sera détruit."
+    avert "Une lettre « D: » peut désigner une partition du MÊME disque que C:."
+    echo
+    echo "  Vérifier avant de continuer, depuis Windows :"
+    echo "      Get-Partition | Select DiskNumber, DriveLetter, Size"
+    echo "  Si D: et C: portent le même DiskNumber, ARRÊTER ICI."
+fi
+
 octets_disque="$(blockdev --getsize64 "$CIBLE")"
 mio_disque=$((octets_disque / 1024 / 1024))
 mio_ram=$(( $(awk '/MemTotal/{print $2}' /proc/meminfo) / 1024 ))
@@ -143,6 +173,13 @@ if (( SIMULATION )); then
     exit 0
 fi
 
+if (( windows )); then
+    echo
+    read -rp 'Ce disque porte Windows. Taper « JE SAIS » pour continuer : ' reponse_windows
+    [[ "$reponse_windows" == "JE SAIS" ]] || { echo "Annulé."; exit 1; }
+fi
+
+echo
 echo "TOUT LE CONTENU DE $CIBLE SERA DÉFINITIVEMENT EFFACÉ."
 read -rp 'Taper « EFFACER » en majuscules pour confirmer : ' confirmation
 [[ "$confirmation" == "EFFACER" ]] || { echo "Annulé."; exit 1; }
@@ -313,13 +350,20 @@ EOL
 sed -i "s|^GRUB_CMDLINE_LINUX=.*|GRUB_CMDLINE_LINUX=\"resume=UUID=$(blkid -s UUID -o value $P_SWAP)\"|" /etc/default/grub
 
 if [ -d /sys/firmware/efi ]; then
+    # --removable place l'amorceur au chemin générique EFI/BOOT/BOOTX64.EFI,
+    # sur la partition EFI de CE disque. --no-nvram interdit d'écrire quoi
+    # que ce soit dans la mémoire de la carte mère : ni entrée d'amorçage,
+    # ni changement d'ordre.
+    #
+    # Conséquence voulue : l'ordinateur démarre exactement comme avant, et
+    # ce système n'apparaît que si on le choisit dans le menu d'amorçage du
+    # micrologiciel (F12 chez Dell et Lenovo, F9 chez HP). Le disque porte
+    # tout ce qu'il lui faut ; le débrancher ne laisse aucune trace.
     grub-install --target=x86_64-efi --efi-directory=/boot/efi \
-        --bootloader-id=agent-os --recheck
-    # Copie de secours à l'emplacement générique : certains micrologiciels
-    # ignorent les entrées NVRAM et ne cherchent que ce chemin.
-    mkdir -p /boot/efi/EFI/BOOT
-    cp /boot/efi/EFI/agent-os/grubx64.efi /boot/efi/EFI/BOOT/BOOTX64.EFI
+        --removable --no-nvram --recheck
 else
+    # En BIOS, le secteur d'amorçage du disque cible suffit : le menu du
+    # micrologiciel permet de choisir sur quel disque démarrer.
     grub-install --target=i386-pc --recheck $CIBLE
 fi
 update-grub
@@ -370,6 +414,14 @@ succes "agent-os installé sur $CIBLE"
 cat <<EOF
 
   Retirer le support d'installation, puis redémarrer.
+
+  RIEN N'A ÉTÉ MODIFIÉ SUR LE RESTE DE L'ORDINATEUR. L'amorceur vit sur
+  la partition EFI de $CIBLE, et l'ordre de démarrage de la carte mère
+  n'a pas été touché : la machine redémarre sur son système habituel.
+
+  Pour démarrer sur agent-os, ouvrir le menu d'amorçage au démarrage —
+  F12 chez Dell et Lenovo, F9 chez HP, Échap ailleurs — et choisir ce
+  disque. Chaque démarrage se choisit ainsi ; rien n'est permanent.
 
   Au premier démarrage :
 

@@ -1,0 +1,191 @@
+#!/usr/bin/env bash
+# Donne une mémoire à la clé USB, sans rien écrire sur l'ordinateur.
+#
+# L'image live est en lecture seule : tout ce que le système écrit vit en
+# mémoire vive et disparaît à l'extinction. Ce script crée, dans l'espace
+# libre resté après l'image sur la clé, une partition que live-boot
+# superpose au système à chaque démarrage. La mémoire de l'agent, ses
+# secrets et ses réglages survivent alors aux redémarrages.
+#
+# Rien n'est touché sur les disques de l'ordinateur : ni partition, ni
+# secteur d'amorçage, ni ordre de démarrage UEFI. Retirer la clé remet la
+# machine exactement dans l'état où elle était.
+#
+#   sudo agentos-persistance                 # tout persiste
+#   sudo agentos-persistance --memoire-seule # seulement l'état de l'agent
+#   sudo agentos-persistance --simulation    # montrer le plan, ne rien faire
+
+set -euo pipefail
+
+ETIQUETTE="persistence"
+MODE="complet"
+SIMULATION=0
+MINIMUM_MIO=512
+
+info()   { printf '\033[36m::\033[0m %s\n' "$*"; }
+succes() { printf '\033[32mok\033[0m %s\n' "$*"; }
+avert()  { printf '\033[33m! \033[0m %s\n' "$*"; }
+erreur() { printf '\033[31méchec\033[0m %s\n' "$*" >&2; exit 1; }
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --memoire-seule) MODE="memoire"; shift ;;
+        --simulation)    SIMULATION=1; shift ;;
+        -h|--aide)
+            sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+            exit 0 ;;
+        *) erreur "option inconnue : $1" ;;
+    esac
+done
+
+[[ $EUID -eq 0 ]] || erreur "partitionner exige root : sudo agentos-persistance"
+
+for outil in sgdisk mkfs.ext4 findmnt lsblk partprobe blkid; do
+    command -v "$outil" >/dev/null || erreur "outil manquant : $outil"
+done
+
+# --- le support d'où l'on a démarré ---------------------------------------
+
+# On ne travaille que sur la clé qui porte le système en cours. Demander un
+# disque à l'utilisateur ouvrirait la porte à ce qu'on cherche justement à
+# éviter : toucher un disque de l'ordinateur.
+partition_live="$(findmnt -no SOURCE /run/live/medium 2>/dev/null || true)"
+[[ -n "$partition_live" ]] || erreur \
+    "ce système ne tourne pas depuis un support live.
+    Ce script n'a de sens que démarré sur la clé agent-os."
+
+disque="/dev/$(lsblk -no PKNAME "$partition_live" 2>/dev/null | head -1)"
+[[ -b "$disque" ]] || erreur "disque porteur introuvable pour $partition_live"
+
+transport="$(lsblk -dno TRAN "$disque" 2>/dev/null)"
+modele="$(lsblk -dno MODEL "$disque" 2>/dev/null | sed 's/ *$//')"
+taille_mio=$(( $(blockdev --getsize64 "$disque") / 1024 / 1024 ))
+
+info "support de démarrage : $disque ($modele, ${taille_mio} Mio, ${transport:-inconnu})"
+[[ "$transport" == "usb" ]] || avert \
+    "ce support n'est pas déclaré USB — vérifier qu'il s'agit bien de la clé"
+
+# --- une persistance existe-t-elle déjà ? ---------------------------------
+
+existante="$(blkid -L "$ETIQUETTE" 2>/dev/null || true)"
+if [[ -n "$existante" ]]; then
+    montage="$(findmnt -no TARGET "$existante" 2>/dev/null || echo 'non montée')"
+    succes "une partition de persistance existe déjà : $existante ($montage)"
+    if [[ -d /run/live/persistence ]]; then
+        echo "  La mémoire est active : ce qui est écrit maintenant survivra au"
+        echo "  redémarrage."
+    else
+        avert "elle existe mais n'est pas active — redémarrer pour l'utiliser"
+    fi
+    exit 0
+fi
+
+# --- espace libre ---------------------------------------------------------
+
+# sgdisk rend la liste des secteurs libres ; on prend le plus grand bloc.
+secteur_octets="$(blockdev --getss "$disque")"
+libre="$(sgdisk --first-aligned-in-largest-free "$disque" 2>/dev/null || echo "")"
+fin_libre="$(sgdisk --end-of-largest-free "$disque" 2>/dev/null || echo "")"
+
+if [[ -z "$libre" || -z "$fin_libre" ]]; then
+    erreur "impossible de lire l'espace libre de $disque.
+    La clé a peut-être été écrite par un outil qui a occupé tout le disque."
+fi
+
+libre_mio=$(( (fin_libre - libre + 1) * secteur_octets / 1024 / 1024 ))
+info "espace libre après l'image : ${libre_mio} Mio"
+
+if (( libre_mio < MINIMUM_MIO )); then
+    erreur "seulement ${libre_mio} Mio libres, il en faut au moins ${MINIMUM_MIO}.
+    Utiliser une clé plus grande : l'image occupe environ 500 Mio, et la
+    mémoire de l'agent a besoin de place pour grandir."
+fi
+
+numero="$(( $(sgdisk --print "$disque" 2>/dev/null \
+            | awk '/^ +[0-9]+/{n=$1} END{print n+0}') + 1 ))"
+
+cat <<EOF
+
+  Clé            : $disque  ($modele)
+  Partition      : ${disque}${numero}, ${libre_mio} Mio
+  Étiquette      : $ETIQUETTE
+  Mode           : $([[ "$MODE" == complet ]] \
+                     && echo "complet — tout le système persiste" \
+                     || echo "mémoire seule — état de l'agent uniquement")
+
+  Rien ne sera écrit sur les disques de cet ordinateur.
+
+EOF
+
+if (( SIMULATION )); then
+    succes "simulation : rien n'a été écrit"
+    exit 0
+fi
+
+read -rp 'Créer cette partition ? (oui/non) ' reponse
+[[ "$reponse" == "oui" || "$reponse" == "o" ]] || { echo "Annulé."; exit 1; }
+
+# --- création -------------------------------------------------------------
+
+info "création de la partition"
+# --largest-new utilise tout l'espace libre le plus grand, sans avoir à
+# calculer les secteurs à la main — donc sans risque d'empiéter sur ce qui
+# existe déjà.
+sgdisk --largest-new="$numero" \
+       --change-name="$numero:$ETIQUETTE" \
+       --typecode="$numero:8300" "$disque" >/dev/null \
+    || erreur "sgdisk a échoué sur $disque"
+
+partprobe "$disque" 2>/dev/null || true
+udevadm settle --timeout=30 2>/dev/null || sleep 3
+
+cible="${disque}${numero}"
+case "$disque" in *nvme*|*mmcblk*) cible="${disque}p${numero}" ;; esac
+[[ -b "$cible" ]] || erreur "la partition $cible n'est pas apparue"
+
+info "formatage"
+# L'étiquette est ce que live-boot cherche au démarrage : sans elle, la
+# partition existe mais n'est jamais utilisée.
+mkfs.ext4 -q -L "$ETIQUETTE" -m 0 "$cible" || erreur "formatage impossible"
+
+# --- configuration --------------------------------------------------------
+
+point="$(mktemp -d)"
+mount "$cible" "$point" || erreur "montage impossible"
+trap 'umount "$point" 2>/dev/null; rmdir "$point" 2>/dev/null' EXIT
+
+if [[ "$MODE" == complet ]]; then
+    # Superposition de la racine entière : tout ce qu'on installe, règle ou
+    # mémorise survit. C'est le comportement attendu d'« un système sur
+    # clé », au prix d'écritures plus nombreuses sur la mémoire flash.
+    printf '/ union\n' > "$point/persistence.conf"
+else
+    # Seulement ce qui compte : la mémoire de l'agent, ses secrets et ses
+    # modèles. Le reste du système reste en lecture seule, donc plus rapide
+    # et impossible à casser durablement.
+    cat > "$point/persistence.conf" <<'EOL'
+/etc/agentos union
+/var/lib/agentos union
+/var/lib/models union
+/home union
+EOL
+fi
+
+succes "persistance configurée sur $cible"
+sync
+
+cat <<EOF
+
+  Redémarrer pour l'activer. Au prochain démarrage, choisir simplement
+  « agent-os — démarrer » : la mémoire est reconnue automatiquement.
+
+  Ensuite, une fois revenu :
+
+      sudo systemctl enable --now agentos    # démarrer l'agent à chaque boot
+      sudo nano /etc/agentos/secrets.env     # clé API, Supabase
+      agentosctl doctor
+
+  Ce que l'agent apprendra sera conservé sur la clé. L'ordinateur, lui,
+  n'a été touché en rien.
+
+EOF

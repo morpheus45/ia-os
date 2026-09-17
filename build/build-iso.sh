@@ -195,8 +195,12 @@ cat <<'BANNIERE'
   agent-os — image d'installation
 
   Vérifier le matériel :      agentos-materiel
-  Installer sur le disque :   sudo agentos-installer
+  Garder la mémoire :         sudo agentos-persistance
+  Installer sur un disque :   sudo agentos-installer
   Documentation :             /usr/share/doc/agent-os/
+
+  La persistance donne une mémoire à la clé sans rien écrire sur
+  l'ordinateur. L'installation, elle, efface le disque qu'on lui donne.
 
 BANNIERE
 EOL

@@ -94,7 +94,8 @@ chmod -R a+rX "$DEST_PY/agentos"
 
 info "installation des exécutables"
 install -D -m 0755 "$SOURCE/system/bin/agentos-backup"  "${RACINE}usr/local/bin/agentos-backup"
-install -D -m 0755 "$SOURCE/system/bin/agentos-materiel" "${RACINE}usr/local/bin/agentos-materiel"
+install -D -m 0755 "$SOURCE/system/bin/agentos-materiel"    "${RACINE}usr/local/bin/agentos-materiel"
+install -D -m 0755 "$SOURCE/system/bin/agentos-persistance" "${RACINE}usr/local/bin/agentos-persistance"
 cat > "${RACINE}usr/local/bin/agentosctl" <<'EOF'
 #!/usr/bin/python3
 import sys
