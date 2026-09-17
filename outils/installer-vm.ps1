@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Installe agent-os sur un disque physique, depuis Windows, sans redémarrer.
 
@@ -150,6 +150,9 @@ if ($partitions) {
     }
 }
 Write-Host "  Mode          : $(if ($Bios) { 'BIOS hérité' } else { 'UEFI' })"
+if ($cible.BusType -eq 'USB') {
+    Write-Host "  Support       : externe (USB) — signalé à l'installateur"
+}
 Write-Host ""
 Write-Host "  TOUT LE CONTENU DE CE DISQUE SERA DÉFINITIVEMENT EFFACÉ." -ForegroundColor Red
 Write-Host "  Windows continuera de tourner pendant l'opération." -ForegroundColor Cyan
@@ -189,6 +192,21 @@ Bien "accès brut au disque physique $Disque"
 & $vbox storageattach $NomVM --storagectl SATA --port 1 --device 0 `
         --type dvddrive --medium "$iso" | Out-Null
 
+# VirtualBox présente le disque brut au système invité comme un disque
+# SATA, quel que soit son branchement réel. L'installateur, qui décide du
+# délai d'attente au démarrage et de l'hibernation d'après le transport
+# rapporté par le noyau, conclurait donc « interne » pour un disque USB —
+# et le système installé ne démarrerait pas une fois branché sur le vrai
+# ordinateur. Windows, lui, connaît le vrai bus : on le lui transmet.
+$externe = ($cible.BusType -eq 'USB')
+$option  = if ($externe) { " --externe" } else { "" }
+$noteExterne = if ($externe) {
+    "`n  L'option --externe n'est pas facultative ici : ce disque est branché" +
+    "`n  en USB, la machine virtuelle le montre en SATA, et sans elle le" +
+    "`n  système installé s'arrêterait au démarrage sur" +
+    "`n  « ALERT! UUID=... does not exist ».`n"
+} else { "" }
+
 Info "démarrage de la machine virtuelle"
 & $vbox startvm $NomVM --type gui | Out-Null
 
@@ -199,8 +217,9 @@ Write-Host @"
   Dans la machine virtuelle :
 
       sudo agentos-materiel                      vérifier ce qui est vu
-      sudo agentos-installer --simulation        afficher le plan
-      sudo agentos-installer                     installer
+      sudo agentos-installer$option --simulation   afficher le plan
+      sudo agentos-installer$option                installer
+$noteExterne
 
   Le disque à choisir est /dev/sda — c'est ton disque physique $Disque,
   vu directement par la machine virtuelle. Il doit afficher la bonne

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Télécharge l'image agent-os et l'écrit sur une clé USB.
 

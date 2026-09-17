@@ -14,6 +14,7 @@ set -euo pipefail
 CIBLE=""
 SIMULATION=0
 CHIFFRER=0
+EXTERNE=auto
 NOM_MACHINE="agent-os"
 
 # --- tailles fixes, en Mio ------------------------------------------------
@@ -42,6 +43,8 @@ Usage : agentos-installer [options]
   -d, --disque /dev/sdX   disque cible (sans cette option, la liste est proposée)
   -n, --nom NOM           nom de la machine (défaut : agent-os)
       --chiffrer          chiffre la partition de mémoire (LUKS2)
+      --externe           la cible est un disque débranchable (USB, eSATA)
+      --interne           la cible est un disque interne
       --simulation        affiche le plan sans rien écrire
   -h, --aide              cette aide
 
@@ -50,6 +53,11 @@ contrepartie une phrase de passe à chaque démarrage : une machine censée
 redémarrer seule après une coupure de courant ne repartira pas sans
 quelqu'un pour la saisir. À n'activer que si la machine est physiquement
 exposée et qu'une présence au redémarrage est acceptable.
+
+Sans --externe ni --interne, la nature du support est déduite du transport
+rapporté par le noyau. Cette déduction est fausse lorsque l'installation se
+fait depuis une machine virtuelle : l'hyperviseur présente le disque en
+SATA quel que soit son branchement réel. Dans ce cas, l'indiquer.
 EOF
 }
 
@@ -58,6 +66,8 @@ while [[ $# -gt 0 ]]; do
         -d|--disque)     CIBLE="${2:-}"; shift 2 ;;
         -n|--nom)        NOM_MACHINE="${2:-}"; shift 2 ;;
         --chiffrer)      CHIFFRER=1; shift ;;
+        --externe)       EXTERNE=oui; shift ;;
+        --interne)       EXTERNE=non; shift ;;
         --simulation)    SIMULATION=1; shift ;;
         -h|--aide)       usage; exit 0 ;;
         *) erreur "option inconnue : $1 (voir --aide)" ;;
@@ -148,6 +158,55 @@ reste=$(( mio_disque - TAILLE_EFI - TAILLE_RACINE - mio_swap - RESERVE ))
 mio_memoire=$(( reste * PART_MEMOIRE / 100 ))
 mio_modeles=$(( reste - mio_memoire ))
 
+# --- nature du support ----------------------------------------------------
+# Un disque débranchable ne se configure pas comme un disque interne : il
+# met plusieurs secondes à s'annoncer au noyau, et l'hibernation n'a pas de
+# sens sur un support qui peut être absent au réveil. Les réglages sont
+# décidés ici, une seule fois, parce que la simulation doit annoncer
+# exactement ce que l'installation fera.
+#
+# Le transport rapporté par le noyau ne suffit pas à trancher. Installé
+# depuis une machine virtuelle à qui l'on a donné l'accès brut au disque,
+# l'hyperviseur le présente en SATA même s'il est branché en USB sur la
+# machine réelle : la déduction conclurait « interne », le système
+# recevrait « resume= » sans délai d'attente, et ne démarrerait pas une
+# fois le disque rebranché sur le vrai ordinateur. La panne — « ALERT!
+# UUID=… does not exist » — surviendrait au premier démarrage, longtemps
+# après l'installation, sans rien pour la relier à sa cause.
+transport_cible="$(lsblk -dno TRAN "$CIBLE" 2>/dev/null | head -1)"
+virtualise=0
+if command -v systemd-detect-virt >/dev/null 2>&1 \
+   && systemd-detect-virt --quiet 2>/dev/null; then
+    virtualise=1
+fi
+
+case "$EXTERNE" in
+    oui) cible_externe=1; origine_support="déclaré" ;;
+    non) cible_externe=0; origine_support="déclaré" ;;
+    *)
+        origine_support="déduit"
+        if [[ "$transport_cible" == "usb" ]]; then
+            cible_externe=1
+        else
+            cible_externe=0
+        fi
+        ;;
+esac
+
+if (( virtualise )) && [[ "$EXTERNE" == auto ]]; then
+    avert "installation depuis une machine virtuelle : le transport annoncé"
+    avert "(${transport_cible:-inconnu}) est celui que présente l'hyperviseur, pas"
+    avert "celui du disque réel. Si ce disque est branché en USB sur"
+    avert "l'ordinateur, relancer avec --externe : sinon le système installé"
+    avert "ne démarrera pas."
+fi
+
+if (( cible_externe )); then
+    description_support="externe — délai de démarrage, pas d'hibernation"
+else
+    description_support="interne"
+fi
+
 # `bc` n'est pas garanti sur une image minimale ; awk l'est.
 go() { awk -v m="$1" 'BEGIN{ printf "%.1f Gio", m/1024 }'; }
 
@@ -157,9 +216,7 @@ cat <<EOF
   Mémoire vive: $(go $mio_ram)
   Machine     : $NOM_MACHINE
   Chiffrement : $([[ $CHIFFRER -eq 1 ]] && echo "oui (LUKS2 sur la mémoire)" || echo non)
-  Support     : $([[ "$(lsblk -dno TRAN "$CIBLE" 2>/dev/null | head -1)" == usb ]] \
-                  && echo "externe (USB) — délai de démarrage, pas d'hibernation" \
-                  || echo "interne")
+  Support     : $description_support ($origine_support)
 
   Partitionnement prévu :
 
@@ -322,8 +379,7 @@ EOF
 # le système de fichiers. On retire donc « resume= » plutôt que de laisser
 # une bombe à retardement.
 
-transport_cible="$(lsblk -dno TRAN "$CIBLE" 2>/dev/null | head -1)"
-if [[ "$transport_cible" == "usb" ]]; then
+if (( cible_externe )); then
     parametres_noyau="rootdelay=5"
     avert "disque externe : délai d'attente du noyau ajouté, hibernation désactivée"
 else

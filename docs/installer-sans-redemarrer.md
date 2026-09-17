@@ -68,6 +68,11 @@ sudo agentos-installer --simulation    # le plan, sans rien écrire
 sudo agentos-installer                 # installer
 ```
 
+Sur un disque **externe**, ajouter `--externe` aux deux dernières
+commandes ; le script PowerShell le rappelle au moment voulu. Voir
+[Particularités d'un disque externe](#particularités-dun-disque-externe)
+pour la raison — elle n'est pas facultative.
+
 Le disque à choisir est `/dev/sda`. **Vérifier qu'il affiche la taille de
 ton disque physique** — c'est le seul contrôle qui garantit qu'on ne vise
 pas le bon numéro par erreur.
@@ -94,7 +99,7 @@ sans message.
 
 ## Particularités d'un disque externe
 
-L'installateur détecte un support USB et adapte deux réglages :
+Un disque débranchable exige deux réglages qu'un disque interne n'a pas :
 
 - **`rootdelay=5`** — un disque USB met plusieurs secondes à s'annoncer au
   noyau. Sans ce délai, l'initramfs cherche la racine avant qu'elle
@@ -103,6 +108,23 @@ L'installateur détecte un support USB et adapte deux réglages :
 - **Pas d'hibernation** — reprendre depuis une image écrite sur un disque
   qu'on peut débrancher est impossible, et remonter ensuite ce disque dans
   l'état où l'hibernation l'a laissé corrompt le système de fichiers.
+
+Démarré depuis une clé, l'installateur reconnaît un disque USB tout seul.
+**Depuis une machine virtuelle, il ne le peut pas** : VirtualBox présente
+le disque brut au système invité comme un disque SATA, quel que soit son
+branchement réel. La déduction conclurait « interne », et le système
+installé s'arrêterait au premier démarrage sur le vrai ordinateur.
+
+D'où l'option `--externe`, que `installer-vm.ps1` affiche de lui-même
+quand Windows rapporte un bus USB — Windows, lui, connaît le vrai
+branchement. `--simulation` annonce la nature retenue :
+
+```
+Support     : externe — délai de démarrage, pas d'hibernation (déclaré)
+```
+
+`déclaré` signifie que la nature vient de l'option, `déduit` qu'elle vient
+du noyau. Dans une machine virtuelle, seul `déclaré` est fiable.
 
 Un disque dur externe ou un SSD convient. Une clé USB ordinaire non : sa
 mémoire flash n'a ni cache ni bonne répartition de l'usure, et la mémoire

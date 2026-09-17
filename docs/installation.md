@@ -64,6 +64,19 @@ Il demande ensuite un compte d'administration et une clé SSH publique.
 **Sans clé, l'accès distant sera impossible** : le système refuse
 l'authentification par mot de passe.
 
+### Disque interne ou débranchable
+
+Un disque externe reçoit `rootdelay=5` et perd l'hibernation : sans le
+délai, l'initramfs cherche la racine avant que le disque USB ne se soit
+annoncé et tombe dans un shell de secours ; et reprendre une hibernation
+depuis un disque qu'on peut débrancher corrompt le système de fichiers.
+
+Démarré depuis une clé, l'installateur reconnaît le support tout seul.
+Depuis une machine virtuelle, non : l'hyperviseur présente le disque brut
+en SATA quel que soit son branchement réel. `--externe` et `--interne`
+tranchent à la main ; `--simulation` indique si la nature retenue est
+`déclaré` ou `déduit`.
+
 ### Chiffrer la mémoire
 
 `--chiffrer` place la partition `/var/lib/agentos` sous LUKS2. La mémoire
