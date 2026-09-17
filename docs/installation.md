@@ -50,6 +50,15 @@ L'image est hybride : elle démarre en BIOS comme en UEFI.
 Démarrer sur la clé. La session s'ouvre seule sur un compte `live`, sans
 mot de passe — l'image sert à installer, pas à travailler.
 
+L'assistant s'ouvre avec elle : il liste les disques par taille et par
+modèle, écarte le support de démarrage, signale ceux qui portent Windows
+et ceux qui sont trop petits, montre le plan et attend une confirmation.
+Personne ne devrait avoir à connaître le nom Linux de son disque pour
+installer un système.
+
+Le choix **4) Ouvrir un terminal** rend la main ; `agentos-bienvenue`
+relance l'assistant. Pour piloter l'installateur directement :
+
 ```bash
 sudo agentos-installer --simulation    # afficher le plan sans rien écrire
 sudo agentos-installer

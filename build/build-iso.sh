@@ -156,6 +156,11 @@ chroot "$CHROOT" /bin/bash -c "RACINE=/ /tmp/agent-os/system/install-system.sh"
 install -D -m 0755 "$RACINE_PROJET/install/install.sh" \
     "$CHROOT/usr/local/bin/agentos-installer"
 
+# L'assistant, lui, s'ouvre tout seul : personne ne devrait avoir à
+# connaître le nom Linux de son disque pour installer un système.
+install -D -m 0755 "$RACINE_PROJET/install/bienvenue.sh" \
+    "$CHROOT/usr/local/bin/agentos-bienvenue"
+
 # --- session live ---------------------------------------------------------
 
 info "configuration de la session live"
@@ -190,10 +195,18 @@ systemctl disable agentos.service agentos-model.service agentos-backup.timer || 
 systemctl enable ssh || true
 
 cat > /home/live/.bash_profile <<'EOL'
+# L'assistant ne s'ouvre que sur la console physique. Une session SSH est
+# ouverte pour faire autre chose, et personne n'est devant l'écran pour
+# répondre à un menu : il bloquerait la session sans rien installer.
+if [[ "$(tty)" == /dev/tty1 && -z "${AGENTOS_SANS_ASSISTANT:-}" ]]; then
+    agentos-bienvenue
+fi
+
 cat <<'BANNIERE'
 
   agent-os — image d'installation
 
+  Assistant d'installation :  agentos-bienvenue
   Vérifier le matériel :      agentos-materiel
   Garder la mémoire :         sudo agentos-persistance
   Installer sur un disque :   sudo agentos-installer
@@ -349,5 +362,5 @@ Essayer sans matériel :
 
     qemu-system-x86_64 -m 4096 -cdrom $SORTIE/$NOM_IMAGE
 
-Une fois démarré : sudo agentos-installer
+Une fois démarré, l'assistant s'ouvre tout seul et pose les questions.
 EOF

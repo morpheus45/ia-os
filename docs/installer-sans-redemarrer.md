@@ -60,18 +60,24 @@ Le script liste les disques en marquant celui qui porte Windows, refuse
 de l'écraser, demande confirmation, met le disque choisi hors ligne, crée
 la machine virtuelle en UEFI et la démarre.
 
-Dans la fenêtre qui s'ouvre :
+Dans la fenêtre qui s'ouvre, l'assistant démarre tout seul. Choisir
+**1) Installer agent-os sur un disque**, puis le disque dans la liste.
+
+Il demande lui-même si le disque est externe, parce qu'il détecte qu'il
+tourne dans une machine virtuelle et sait qu'il ne peut pas le deviner —
+répondre **oui** pour un HDD branché en USB. Il affiche ensuite le plan,
+attend une confirmation, et rien n'est écrit avant.
+
+Pour piloter l'installateur à la main :
 
 ```bash
-sudo agentos-materiel                  # ce que la machine voit
-sudo agentos-installer --simulation    # le plan, sans rien écrire
-sudo agentos-installer                 # installer
+sudo agentos-materiel                            # ce que la machine voit
+sudo agentos-installer --externe --simulation    # le plan, sans rien écrire
+sudo agentos-installer --externe                 # installer
 ```
 
-Sur un disque **externe**, ajouter `--externe` aux deux dernières
-commandes ; le script PowerShell le rappelle au moment voulu. Voir
-[Particularités d'un disque externe](#particularités-dun-disque-externe)
-pour la raison — elle n'est pas facultative.
+`--externe` n'est pas facultative ici : voir
+[Particularités d'un disque externe](#particularités-dun-disque-externe).
 
 Le disque à choisir est `/dev/sda`. **Vérifier qu'il affiche la taille de
 ton disque physique** — c'est le seul contrôle qui garantit qu'on ne vise

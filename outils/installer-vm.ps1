@@ -201,8 +201,9 @@ Bien "accès brut au disque physique $Disque"
 $externe = ($cible.BusType -eq 'USB')
 $option  = if ($externe) { " --externe" } else { "" }
 $noteExterne = if ($externe) {
-    "`n  L'option --externe n'est pas facultative ici : ce disque est branché" +
-    "`n  en USB, la machine virtuelle le montre en SATA, et sans elle le" +
+    "`n  Ce disque est branché en USB : quand l'assistant demande s'il" +
+    "`n  s'agit d'un disque externe, répondre OUI. La machine virtuelle le" +
+    "`n  montre en SATA et ne peut pas le deviner ; sans cette réponse, le" +
     "`n  système installé s'arrêterait au démarrage sur" +
     "`n  « ALERT! UUID=... does not exist ».`n"
 } else { "" }
@@ -216,10 +217,15 @@ Write-Host @"
 
   Dans la machine virtuelle :
 
+  L'assistant démarre tout seul : choisir « Installer agent-os sur un
+  disque », puis le disque dans la liste. Il pose lui-même les questions
+  et n'écrit rien avant confirmation.
+$noteExterne
+  Pour piloter l'installateur à la main :
+
       sudo agentos-materiel                      vérifier ce qui est vu
       sudo agentos-installer$option --simulation   afficher le plan
       sudo agentos-installer$option                installer
-$noteExterne
 
   Le disque à choisir est /dev/sda — c'est ton disque physique $Disque,
   vu directement par la machine virtuelle. Il doit afficher la bonne
